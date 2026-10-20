@@ -10,7 +10,13 @@ import com.geckolib.animation.RawAnimation;
 import com.geckolib.renderer.GeoItemRenderer;
 import com.geckolib.util.GeckoLibUtil;
 import com.newcolleague.mod.client.BaculoRenderer;
+import com.newcolleague.mod.entity.KoboldGirlEntity;
+import com.newcolleague.mod.entity.ModItems;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -25,13 +31,15 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemUseAnimation;
 import net.minecraft.world.item.ShieldItem;
+import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 import java.util.function.Consumer;
-import com.newcolleague.mod.entity.KoboldGirlEntity;
 
 public class BaculoItem extends Item implements GeoItem {
 
@@ -43,8 +51,101 @@ public class BaculoItem extends Item implements GeoItem {
         SingletonGeoAnimatable.registerSyncedAnimatable(this);
     }
 
+    public static int getStaffLevel(ItemStack stack) {
+        if (stack.isEmpty()) return 1;
+        CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
+        if (customData != null) {
+            CompoundTag tag = customData.copyTag();
+            return Math.max(1, tag.getInt("BaculoLevel").orElse(1));
+        }
+        return 1;
+    }
+
+    public static void setStaffLevel(ItemStack stack, int level) {
+        if (stack.isEmpty()) return;
+        int clamped = Math.max(1, Math.min(7, level));
+        CustomData.update(DataComponents.CUSTOM_DATA, stack, tag -> {
+            tag.putInt("BaculoLevel", clamped);
+        });
+    }
+
+    public static BaculoTier getStaffTier(ItemStack stack) {
+        return BaculoTier.byLevel(getStaffLevel(stack));
+    }
+
+    public static boolean upgradePlayerStaff(Player player, int targetLevel) {
+        boolean upgraded = false;
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            ItemStack stack = player.getInventory().getItem(i);
+            if (stack.is(ModItems.BACULO.get())) {
+                int currentLevel = getStaffLevel(stack);
+                if (currentLevel < targetLevel) {
+                    setStaffLevel(stack, targetLevel);
+                    upgraded = true;
+                }
+            }
+        }
+
+        // Registrar progreso persistente en el jugador para auto-sincronizar báculos futuros
+        CompoundTag persistent = player.getPersistentData();
+        int currentUnlocked = persistent.getInt("UnlockedBaculoLevel").orElse(1);
+        boolean unlockedNew = targetLevel > currentUnlocked;
+        if (unlockedNew) {
+            persistent.putInt("UnlockedBaculoLevel", targetLevel);
+        }
+
+        if (upgraded || unlockedNew) {
+            BaculoTier tier = BaculoTier.byLevel(targetLevel);
+            player.sendSystemMessage(Component.literal("✨ ¡Tu Báculo de Mando ha ascendido de nivel! ")
+                    .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD)
+                    .append(Component.literal("El orbe ahora es de ")
+                            .withStyle(ChatFormatting.YELLOW))
+                    .append(Component.literal(tier.getDisplayName())
+                            .withStyle(tier.getFormatting(), ChatFormatting.BOLD))
+                    .append(Component.literal(" (Nivel " + targetLevel + ").")
+                            .withStyle(ChatFormatting.GOLD)));
+
+            if (player.level() instanceof ServerLevel sl) {
+                sl.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, player.getX(), player.getY() + 1.2D, player.getZ(), 40, 0.5D, 0.5D, 0.5D, 0.15D);
+                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, player.getX(), player.getY() + 1.4D, player.getZ(), 20, 0.4D, 0.4D, 0.4D, 0.05D);
+                sl.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 1.0F, 1.0F);
+                sl.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.PLAYERS, 0.9F, 1.2F);
+            }
+        }
+        return upgraded || unlockedNew;
+    }
+
     public static boolean isShield(ItemStack stack) {
         return !stack.isEmpty() && stack.getItem() instanceof ShieldItem;
+    }
+
+    @Override
+    public Component getName(ItemStack stack) {
+        BaculoTier tier = getStaffTier(stack);
+        if (tier.getLevel() > 1) {
+            return super.getName(stack).copy()
+                    .append(Component.literal(" - " + tier.getDisplayName()).withStyle(tier.getFormatting()));
+        }
+        return super.getName(stack);
+    }
+
+    @Override
+    public void appendHoverText(ItemStack stack, TooltipContext context, TooltipDisplay display, Consumer<Component> tooltipOutput, TooltipFlag flag) {
+        super.appendHoverText(stack, context, display, tooltipOutput, flag);
+        BaculoTier tier = getStaffTier(stack);
+
+        tooltipOutput.accept(Component.literal("Nivel: " + tier.getLevel() + " - " + tier.getDisplayName())
+                .withStyle(tier.getFormatting(), ChatFormatting.BOLD));
+
+        if (tier.getLevel() >= 2) {
+            tooltipOutput.accept(Component.literal("✦ Bendición Tribal: Regeneración III para ti y toda tu tribu aliada.")
+                    .withStyle(ChatFormatting.GREEN));
+        } else {
+            tooltipOutput.accept(Component.literal("✦ Curación Básica: Regeneración II personal.")
+                    .withStyle(ChatFormatting.GRAY));
+            tooltipOutput.accept(Component.literal("  (Derrótala o completa ofrendas para desbloquear el poder tribal)")
+                    .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
+        }
     }
 
     @Override
@@ -96,6 +197,7 @@ public class BaculoItem extends Item implements GeoItem {
     @Override
     public void onUseTick(Level level, LivingEntity livingEntity, ItemStack stack, int count) {
         int ticksUsed = this.getUseDuration(stack, livingEntity) - count;
+        BaculoTier tier = getStaffTier(stack);
 
         if (level.isClientSide()) {
             if (ticksUsed % 4 == 0) {
@@ -106,41 +208,56 @@ public class BaculoItem extends Item implements GeoItem {
                         livingEntity.getZ() + (level.getRandom().nextDouble() - 0.5) * 0.8,
                         0, 0.05, 0
                 );
+                if (tier.getLevel() >= 2) {
+                    level.addParticle(
+                            ParticleTypes.ENCHANT,
+                            livingEntity.getX() + (level.getRandom().nextDouble() - 0.5) * 0.9,
+                            livingEntity.getY() + 0.6 + level.getRandom().nextDouble() * 0.9,
+                            livingEntity.getZ() + (level.getRandom().nextDouble() - 0.5) * 0.9,
+                            0, 0.1, 0
+                    );
+                }
             }
         }
 
         if (ticksUsed == 30) {
             if (!level.isClientSide()) {
-                // Regeneración nivel 2 por 10 segundos (200 ticks, amplificador 1)
-                livingEntity.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, 1));
+                if (tier.getLevel() >= 2) {
+                    // Nivel 2+: Regeneración 3 (200 ticks = 10 segundos, amplificador 2)
+                    int amplifier = tier.getRegenAmplifier();
+                    livingEntity.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, amplifier));
 
-                // Extender la bendición curativa a las Kobold Girls de la tribu cercanas
-                List<KoboldGirlEntity> nearbyKobolds = level.getEntitiesOfClass(
-                        KoboldGirlEntity.class,
-                        livingEntity.getBoundingBox().inflate(12.0D),
-                        LivingEntity::isAlive
-                );
-                for (KoboldGirlEntity kobold : nearbyKobolds) {
-                    kobold.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, 1));
-                    if (level instanceof ServerLevel serverLevel) {
-                        serverLevel.sendParticles(
-                                ParticleTypes.HEART,
-                                kobold.getX(), kobold.getY() + 1.2D, kobold.getZ(),
-                                6, 0.3D, 0.3D, 0.3D, 0.05D
-                        );
-                        serverLevel.sendParticles(
-                                ParticleTypes.HAPPY_VILLAGER,
-                                kobold.getX(), kobold.getY() + 1.2D, kobold.getZ(),
-                                6, 0.3D, 0.3D, 0.3D, 0.05D
-                        );
+                    // Capacidad de darle el efecto de regeneración 3 a todas las integrantes cercanas de la tribu cuyo propietario es el jugador
+                    List<KoboldGirlEntity> nearbyKobolds = level.getEntitiesOfClass(
+                            KoboldGirlEntity.class,
+                            livingEntity.getBoundingBox().inflate(14.0D),
+                            k -> k.isAlive() && k.isOwnedBy(livingEntity)
+                    );
+                    for (KoboldGirlEntity kobold : nearbyKobolds) {
+                        kobold.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, amplifier));
+                        if (level instanceof ServerLevel serverLevel) {
+                            serverLevel.sendParticles(
+                                    ParticleTypes.HEART,
+                                    kobold.getX(), kobold.getY() + 1.2D, kobold.getZ(),
+                                    8, 0.3D, 0.3D, 0.3D, 0.05D
+                            );
+                            serverLevel.sendParticles(
+                                    ParticleTypes.HAPPY_VILLAGER,
+                                    kobold.getX(), kobold.getY() + 1.2D, kobold.getZ(),
+                                    6, 0.3D, 0.3D, 0.3D, 0.05D
+                            );
+                        }
                     }
+                } else {
+                    // Nivel 1 (Adoquín): Regeneración básica personal (Regeneración II)
+                    livingEntity.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, 1));
                 }
 
                 if (level instanceof ServerLevel serverLevel) {
                     serverLevel.sendParticles(
                             ParticleTypes.HEART,
                             livingEntity.getX(), livingEntity.getY() + 1.2, livingEntity.getZ(),
-                            7, 0.4, 0.4, 0.4, 0.1
+                            9, 0.4, 0.4, 0.4, 0.1
                     );
                 }
 

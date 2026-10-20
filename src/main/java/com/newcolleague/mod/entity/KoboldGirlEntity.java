@@ -22,6 +22,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import com.newcolleague.mod.item.BaculoEventHandler;
+import com.newcolleague.mod.item.BaculoItem;
 import com.newcolleague.mod.network.QueenDialogueActionPayload;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -1432,6 +1433,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         player.sendSystemMessage(Component.literal("🎉 ¡Alianza pacífica completada! " + loyalCount + " Kobold Girl(s) de la tribu se han unido a ti con total devoción.")
                 .withStyle(ChatFormatting.GREEN));
+
+        // Ascender el Báculo de Mando del jugador al Nivel 2 (Baldosa de Pizarra Profunda)
+        BaculoItem.upgradePlayerStaff(player, 2);
     }
 
     public String getQueenTitle() {
@@ -5426,6 +5430,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                         .withStyle(ChatFormatting.GREEN));
             }
         }
+
+        // Ascender el Báculo de Mando del jugador al Nivel 2 (Baldosa de Pizarra Profunda)
+        BaculoItem.upgradePlayerStaff(player, 2);
     }
 
     public static int resetTribeOwnership(ServerPlayer player, double radius) {
