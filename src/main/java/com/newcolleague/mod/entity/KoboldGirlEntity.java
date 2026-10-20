@@ -5283,7 +5283,13 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (itemInHand.isEmpty()) {
             if (this.isAnyQueen()) {
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
-                    PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(this.getId(), this.getTribeName(), this.getQueenTitle(), true));
+                    PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(
+                            this.getId(),
+                            this.getQueenTitle(),
+                            this.getTribeName(),
+                            this.isPacifistRouteChosen(),
+                            true
+                    ));
                 }
                 return InteractionResult.SUCCESS;
             } else {
