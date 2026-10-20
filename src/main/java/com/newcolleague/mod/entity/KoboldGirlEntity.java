@@ -5141,9 +5141,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         "¿Por qué nos miras tanto? Aléjate...",
         "Nuestra reina vigila atentamente a los intrusos.",
         "No confío en los humanos... ¿qué buscas aquí?",
-        "¿Nos entiendes? Claro que no, solo eres un extraño.",
+        "¿Nos entiendes? Claro que no, aun si no lo haces solo eres un extraño.",
         "Cuidado por dónde pisas, forastero.",
-        "Nuestras guerreras te están vigilando desde las sombras.",
+        "Nuestras guerreras te están vigilando así que cuida tus acciones.",
         "¿Has venido a perturbar la paz de nuestra tribu?"
     };
 
@@ -5159,7 +5159,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     // Frases de súbditas rebeldes
     private static final String[] KOBOLD_REBEL_DIALOGUES = {
         "¡Jamás me someteré a un humano!",
-        "¡Nuestra reina cayó, pero mi espíritu no se doblegará!",
+        "¡Nuestra reina habrá perdido contra ti, pero mi espíritu no se doblegará!",
         "¡Fuera de nuestras tierras, usurpador!",
         "¡Prefiero el exilio antes que servir a un forastero!"
     };
@@ -5167,10 +5167,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     // Frases de súbditas rebeldes hacia un jugador portador del báculo (reconocen el artefacto místico pero rechazan someterse)
     private static final String[] KOBOLD_REBEL_BACULO_DIALOGUES = {
         "¡Ese báculo emana un poder antiguo... pero aún así no te obedeceré!",
-        "Reconozco el artefacto sagrado de nuestros ancestros, pero no a ti como gobernante.",
+        "Reconozco el poder de ese artefacto sagrado, pero no a ti como gobernante.",
         "El báculo te protegerá de mi ira, forastero... pero jamás seré tu súbdita.",
         "¡No intentes darme órdenes ni con ese báculo en la mano!",
-        "La vara de los ancestros te da derecho a pisar estas tierras, no a gobernarme."
+        "Ese artefacto te da derecho a pisar estas tierras, no a gobernarme."
     };
 
     // Frases de Kobold Girls aliadas hacia su nuevo gobernante
@@ -8969,7 +8969,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 Vec3 candidate = super.getPosition();
                 if (candidate != null) {
                     // Si es rebelde y la reina está viva, no deambular a más de 15 bloques de la Reina
-                    if (queenPos != null && candidate.distanceTo(queenPos) > 15.0D) {
+                    if (queenPos != null && candidate.distanceTo(queenPos) > 100.0D) {
                         continue;
                     }
                     BlockPos targetPos = BlockPos.containing(candidate);
