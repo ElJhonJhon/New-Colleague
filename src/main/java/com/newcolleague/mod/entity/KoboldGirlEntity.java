@@ -7956,7 +7956,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 if (Math.abs(dx) >= 2 || Math.abs(dz) >= 2) {
                     BlockPos targetPos = ownerPos.offset(dx, dy, dz);
                     if (KoboldGirlEntity.isBedSideStandable(this.mob.level(), targetPos)) {
-                        this.mob.moveTo(targetPos.getX() + 0.5D, targetPos.getY(), targetPos.getZ() + 0.5D, this.mob.getYRot(), this.mob.getXRot());
+                        this.mob.teleportTo(targetPos.getX() + 0.5D, (double) targetPos.getY(), targetPos.getZ() + 0.5D);
                         this.mob.getNavigation().stop();
                         if (this.mob.level() instanceof ServerLevel sl) {
                             sl.sendParticles(ParticleTypes.PORTAL, this.mob.getX(), this.mob.getY() + 0.8D, this.mob.getZ(), 10, 0.3D, 0.4D, 0.3D, 0.05D);
