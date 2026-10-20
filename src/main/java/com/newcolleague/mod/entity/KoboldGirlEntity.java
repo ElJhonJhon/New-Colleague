@@ -22,6 +22,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import com.newcolleague.mod.item.BaculoEventHandler;
+import com.newcolleague.mod.item.BaculoItem;
 import com.newcolleague.mod.network.QueenDialogueActionPayload;
 import com.newcolleague.mod.network.OpenQueenDialoguePayload;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -1541,6 +1542,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         player.sendSystemMessage(Component.literal("🎉 ¡Alianza pacífica completada! " + loyalCount + " Kobold Girl(s) de la tribu se han unido a ti con total devoción.")
                 .withStyle(ChatFormatting.GREEN));
+
+        // Ascender el Báculo de Mando del jugador al Nivel 2 (Baldosa de Pizarra Profunda)
+        BaculoItem.upgradePlayerStaff(player, 2);
     }
 
     public String getQueenTitle() {
@@ -5399,9 +5403,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         "¿Por qué nos miras tanto? Aléjate...",
         "Nuestra reina vigila atentamente a los intrusos.",
         "No confío en los humanos... ¿qué buscas aquí?",
-        "¿Nos entiendes? Claro que no, solo eres un extraño.",
+        "¿Nos entiendes? Claro que no, aun si no lo haces solo eres un extraño.",
         "Cuidado por dónde pisas, forastero.",
-        "Nuestras guerreras te están vigilando desde las sombras.",
+        "Nuestras guerreras te están vigilando así que cuida tus acciones.",
         "¿Has venido a perturbar la paz de nuestra tribu?"
     };
 
@@ -5417,7 +5421,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     // Frases de súbditas rebeldes
     private static final String[] KOBOLD_REBEL_DIALOGUES = {
         "¡Jamás me someteré a un humano!",
-        "¡Nuestra reina cayó, pero mi espíritu no se doblegará!",
+        "¡Nuestra reina habrá perdido contra ti, pero mi espíritu no se doblegará!",
         "¡Fuera de nuestras tierras, usurpador!",
         "¡Prefiero el exilio antes que servir a un forastero!"
     };
@@ -5425,10 +5429,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     // Frases de súbditas rebeldes hacia un jugador portador del báculo (reconocen el artefacto místico pero rechazan someterse)
     private static final String[] KOBOLD_REBEL_BACULO_DIALOGUES = {
         "¡Ese báculo emana un poder antiguo... pero aún así no te obedeceré!",
-        "Reconozco el artefacto sagrado de nuestros ancestros, pero no a ti como gobernante.",
+        "Reconozco el poder de ese artefacto sagrado, pero no a ti como gobernante.",
         "El báculo te protegerá de mi ira, forastero... pero jamás seré tu súbdita.",
         "¡No intentes darme órdenes ni con ese báculo en la mano!",
-        "La vara de los ancestros te da derecho a pisar estas tierras, no a gobernarme."
+        "Ese artefacto te da derecho a pisar estas tierras, no a gobernarme."
     };
 
     // Frases de Kobold Girls aliadas hacia su nuevo gobernante
@@ -5848,6 +5852,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                         .withStyle(ChatFormatting.GREEN));
             }
         }
+
+        // Ascender el Báculo de Mando del jugador al Nivel 2 (Baldosa de Pizarra Profunda)
+        BaculoItem.upgradePlayerStaff(player, 2);
     }
 
     public static int resetTribeOwnership(ServerPlayer player, double radius) {
@@ -8791,8 +8798,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 return false;
             }
             KoboldGirlEntity queen = this.mob.getTribeQueen();
-            // Si la reina está viva y la rebelde se alejó a más de 15 bloques de la reina, activar para regresar hacia ella
-            if (queen != null && queen.isAlive() && this.mob.distanceTo(queen) > 15.0D) {
+            // Si la reina está viva y la rebelde se alejó a más de 150 bloques de la reina, activar para regresar hacia ella
+            if (queen != null && queen.isAlive() && this.mob.distanceTo(queen) > 150.0D) {
                 return true;
             }
             // Buscar al jugador más cercano en un radio de 14 bloques
@@ -8838,11 +8845,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
             KoboldGirlEntity queen = this.mob.getTribeQueen();
 
-            // 1. REGLA ESTRICTA DE PROXIMIDAD: No separarse a más de 15 bloques de la Reina
+            // 1. REGLA ESTRICTA DE PROXIMIDAD: No separarse a más de 150 bloques de la Reina
             // "esas rebeldes que rechazan AL JUGADOR no se deben separar de la reina a mas de 15 bloques"
             if (queen != null && queen.isAlive()) {
                 double distToQueen = this.mob.distanceTo(queen);
-                if (distToQueen > 15.0D) {
+                if (distToQueen > 150.0D) {
                     if (this.mob.getTarget() != null && this.mob.getTarget() instanceof Player) {
                         this.mob.setTarget(null);
                         this.mob.unequipHands();
@@ -9550,7 +9557,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 Vec3 candidate = super.getPosition();
                 if (candidate != null) {
                     // Si es rebelde y la reina está viva, no deambular a más de 15 bloques de la Reina
-                    if (queenPos != null && candidate.distanceTo(queenPos) > 15.0D) {
+                    if (queenPos != null && candidate.distanceTo(queenPos) > 100.0D) {
                         continue;
                     }
                     BlockPos targetPos = BlockPos.containing(candidate);

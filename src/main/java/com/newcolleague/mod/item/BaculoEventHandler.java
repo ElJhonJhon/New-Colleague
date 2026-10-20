@@ -203,6 +203,21 @@ public class BaculoEventHandler {
         Player player = event.getEntity();
         if (player.level().isClientSide()) return;
 
+        // Sincronizar nivel de báculos sostenidos con el mayor nivel desbloqueado por el jugador
+        if (player.tickCount % 20 == 0) {
+            int unlockedLevel = player.getPersistentData().getInt("UnlockedBaculoLevel").orElse(1);
+            if (unlockedLevel > 1) {
+                ItemStack main = player.getMainHandItem();
+                if (main.is(ModItems.BACULO.get()) && BaculoItem.getStaffLevel(main) < unlockedLevel) {
+                    BaculoItem.setStaffLevel(main, unlockedLevel);
+                }
+                ItemStack off = player.getOffhandItem();
+                if (off.is(ModItems.BACULO.get()) && BaculoItem.getStaffLevel(off) < unlockedLevel) {
+                    BaculoItem.setStaffLevel(off, unlockedLevel);
+                }
+            }
+        }
+
         // Confinamiento en el círculo de duelo si el jugador está retando a una Reina Kobold
         KoboldGirlEntity duelQueen = KoboldGirlEntity.getActivePlayerDuelQueen(player);
         if (duelQueen != null && duelQueen.isAlive() && duelQueen.level() == player.level()) {
@@ -311,29 +326,36 @@ public class BaculoEventHandler {
             // Al mantenerlo 30 ticks (~1.5s), se completa la curación simultánea
             if (ticksUsing == 30) {
                 if (!player.getCooldowns().isOnCooldown(mainHand)) {
-                    // Otorgar Regeneración II por 10 segundos
-                    player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, 1));
+                    BaculoTier tier = BaculoItem.getStaffTier(mainHand);
+                    if (tier.getLevel() >= 2) {
+                        int amplifier = tier.getRegenAmplifier(); // 2 = Regeneración III
+                        // Otorgar Regeneración III al jugador por 10 segundos
+                        player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, amplifier));
 
-                    // Curar también a las Kobold Girls de la tribu cercanas
-                    List<KoboldGirlEntity> nearbyKobolds = player.level().getEntitiesOfClass(
-                            KoboldGirlEntity.class,
-                            player.getBoundingBox().inflate(12.0D),
-                            LivingEntity::isAlive
-                    );
-                    for (KoboldGirlEntity kobold : nearbyKobolds) {
-                        kobold.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, 1));
-                        if (player.level() instanceof ServerLevel serverLevel) {
-                            serverLevel.sendParticles(
-                                    ParticleTypes.HEART,
-                                    kobold.getX(), kobold.getY() + 1.2D, kobold.getZ(),
-                                    6, 0.3D, 0.3D, 0.3D, 0.05D
-                            );
-                            serverLevel.sendParticles(
-                                    ParticleTypes.HAPPY_VILLAGER,
-                                    kobold.getX(), kobold.getY() + 1.2D, kobold.getZ(),
-                                    6, 0.3D, 0.3D, 0.3D, 0.05D
-                            );
+                        // Curar también a todas las integrantes cercanas de la tribu cuyo propietario es el jugador
+                        List<KoboldGirlEntity> nearbyKobolds = player.level().getEntitiesOfClass(
+                                KoboldGirlEntity.class,
+                                player.getBoundingBox().inflate(14.0D),
+                                k -> k.isAlive() && k.isOwnedBy(player)
+                        );
+                        for (KoboldGirlEntity kobold : nearbyKobolds) {
+                            kobold.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, amplifier));
+                            if (player.level() instanceof ServerLevel serverLevel) {
+                                serverLevel.sendParticles(
+                                        ParticleTypes.HEART,
+                                        kobold.getX(), kobold.getY() + 1.2D, kobold.getZ(),
+                                        6, 0.3D, 0.3D, 0.3D, 0.05D
+                                );
+                                serverLevel.sendParticles(
+                                        ParticleTypes.HAPPY_VILLAGER,
+                                        kobold.getX(), kobold.getY() + 1.2D, kobold.getZ(),
+                                        6, 0.3D, 0.3D, 0.3D, 0.05D
+                                );
+                            }
                         }
+                    } else {
+                        // Nivel 1: Curación básica personal
+                        player.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 200, 1));
                     }
 
                     if (player.level() instanceof ServerLevel serverLevel) {
@@ -342,6 +364,13 @@ public class BaculoEventHandler {
                                 player.getX(), player.getY() + 1.2, player.getZ(),
                                 8, 0.4, 0.4, 0.4, 0.1
                         );
+                        if (tier.getLevel() >= 2) {
+                            serverLevel.sendParticles(
+                                    ParticleTypes.ENCHANT,
+                                    player.getX(), player.getY() + 1.4, player.getZ(),
+                                    12, 0.5, 0.5, 0.5, 0.1
+                            );
+                        }
                     }
 
                     player.level().playSound(null, player.getX(), player.getY(), player.getZ(),
