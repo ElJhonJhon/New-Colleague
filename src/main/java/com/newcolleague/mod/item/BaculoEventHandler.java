@@ -134,11 +134,13 @@ public class BaculoEventHandler {
 
                 // Si la tribu ya pertenece al jugador
                 if (queen.isOwnedBy(serverPlayer)) {
-                    Component speaker = Component.literal("<" + queen.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
-                    Component msg = Component.literal("Ya eres el gobernante de nuestra tribu, mi señor. Mi pueblo te es leal.")
-                            .withStyle(ChatFormatting.GREEN);
-                    serverPlayer.sendSystemMessage(speaker.copy().append(msg));
-                    queen.playSound(SoundEvents.VILLAGER_YES, 0.9F, 1.1F);
+                    PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(
+                            queen.getId(),
+                            queen.getQueenTitle(),
+                            queen.getTribeName(),
+                            queen.isPacifistRouteChosen(),
+                            true
+                    ));
                     return;
                 }
 
@@ -163,7 +165,8 @@ public class BaculoEventHandler {
                         queen.getId(),
                         queen.getQueenTitle(),
                         queen.getTribeName(),
-                        queen.isPacifistRouteChosen()
+                        queen.isPacifistRouteChosen(),
+                        false
                 ));
             }
         }

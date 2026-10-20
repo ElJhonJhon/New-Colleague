@@ -22,3 +22,6 @@ Desktop.ini
 # Logs
 *.log
 *.log.gz
+
+# Eclipse
+.eclipse/

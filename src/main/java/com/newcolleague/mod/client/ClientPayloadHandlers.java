@@ -12,7 +12,8 @@ public class ClientPayloadHandlers {
                     payload.queenEntityId(),
                     payload.queenTitle(),
                     payload.tribeName(),
-                    payload.pacifistRouteChosen()
+                    payload.pacifistRouteChosen(),
+                    payload.isRuler()
             ));
         }
     }

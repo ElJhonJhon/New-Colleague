@@ -23,6 +23,11 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import com.newcolleague.mod.item.BaculoEventHandler;
 import com.newcolleague.mod.network.QueenDialogueActionPayload;
+import com.newcolleague.mod.network.OpenQueenDialoguePayload;
+import net.neoforged.neoforge.network.PacketDistributor;
+import net.minecraft.world.item.HoeItem;
+import net.minecraft.world.item.SwordItem;
+import net.minecraft.world.item.NameTagItem;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -184,6 +189,57 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     // Mecanica de volverse rey de la tribu Kobold... para nada es esclavitud (UUID en formato String o vacío si es salvaje)
     private static final EntityDataAccessor<String> DATA_OWNER_UUID =
             SynchedEntityData.defineId(KoboldGirlEntity.class, EntityDataSerializers.STRING);
+
+    // Postura de mando del gobernante (WORK, FOLLOW, GUARD)
+    private static final EntityDataAccessor<String> DATA_COMMAND_STANCE =
+            SynchedEntityData.defineId(KoboldGirlEntity.class, EntityDataSerializers.STRING);
+
+    // Nombre de pila personalizado asignado por el gobernante con etiqueta de nombre (ej. "Kira")
+    private static final EntityDataAccessor<String> DATA_CUSTOM_GIVEN_NAME =
+            SynchedEntityData.defineId(KoboldGirlEntity.class, EntityDataSerializers.STRING);
+
+    // Nivel / Rango de maestría de profesión (1 = básico, 2 = veterana/mejorada)
+    private static final EntityDataAccessor<Integer> DATA_PROFESSION_TIER =
+            SynchedEntityData.defineId(KoboldGirlEntity.class, EntityDataSerializers.INT);
+
+    // Posturas de mando disponibles para el gobernante
+    public enum CommandStance {
+        WORK("Rutina de Tribu", "🌾"),
+        FOLLOW("Siguiendo", "🚶"),
+        GUARD("En Guardia", "🛡");
+
+        private final String displayName;
+        private final String icon;
+
+        CommandStance(String displayName, String icon) {
+            this.displayName = displayName;
+            this.icon = icon;
+        }
+
+        public String getDisplayName() {
+            return this.displayName;
+        }
+
+        public String getIcon() {
+            return this.icon;
+        }
+
+        public static CommandStance fromString(String name) {
+            if (name == null || name.isEmpty()) return WORK;
+            for (CommandStance s : values()) {
+                if (s.name().equalsIgnoreCase(name) || s.displayName.equalsIgnoreCase(name)) {
+                    return s;
+                }
+            }
+            return WORK;
+        }
+    }
+
+    // Posición asignada para montar guardia
+    private @Nullable BlockPos guardPosition = null;
+
+    // Marca de tiempo del último tributo recaudado por el gobernante
+    private long lastTributeTime = 0L;
 
     // Profesiones de Kobold Girls súbditas
     public enum KoboldProfession {
@@ -516,6 +572,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         builder.define(DATA_IS_SURVIVOR_QUEEN, false);
         builder.define(DATA_PROFESSION, KoboldProfession.NONE.name());
         builder.define(DATA_OWNER_UUID, "");
+        builder.define(DATA_COMMAND_STANCE, CommandStance.WORK.name());
+        builder.define(DATA_CUSTOM_GIVEN_NAME, "");
+        builder.define(DATA_PROFESSION_TIER, 1);
     }
 
     // Toda esta parte es para la generación de la tribu y su nombre
@@ -718,6 +777,59 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public void setProfession(KoboldProfession profession) {
         this.entityData.set(DATA_PROFESSION, profession != null ? profession.name() : KoboldProfession.NONE.name());
+        this.updateRulerCustomName();
+    }
+
+    public CommandStance getCommandStance() {
+        return CommandStance.fromString(this.entityData.get(DATA_COMMAND_STANCE));
+    }
+
+    public void setCommandStance(CommandStance stance) {
+        this.entityData.set(DATA_COMMAND_STANCE, (stance != null ? stance : CommandStance.WORK).name());
+    }
+
+    public String getCustomGivenName() {
+        return this.entityData.get(DATA_CUSTOM_GIVEN_NAME);
+    }
+
+    public void setCustomGivenName(String name) {
+        this.entityData.set(DATA_CUSTOM_GIVEN_NAME, name != null ? name : "");
+        this.updateRulerCustomName();
+    }
+
+    public int getProfessionTier() {
+        return this.entityData.get(DATA_PROFESSION_TIER);
+    }
+
+    public void setProfessionTier(int tier) {
+        this.entityData.set(DATA_PROFESSION_TIER, Math.max(1, tier));
+        this.updateRulerCustomName();
+    }
+
+    public @Nullable BlockPos getGuardPosition() {
+        return this.guardPosition;
+    }
+
+    public void setGuardPosition(@Nullable BlockPos pos) {
+        this.guardPosition = pos;
+    }
+
+    public void updateRulerCustomName() {
+        if (!this.isOwned()) return;
+        String given = this.getCustomGivenName();
+        String profName = this.isAnyQueen() ? this.getQueenTitle() : this.getProfession().getDisplayName();
+        if (this.getProfessionTier() >= 2) {
+            profName += " ⭐";
+        }
+        if (this.isRebel()) {
+            profName += " Rebelde";
+            this.setCustomName(Component.literal(given.isEmpty() ? profName : given + " [" + profName + "]").withStyle(ChatFormatting.RED));
+        } else {
+            profName += " Leal";
+            ChatFormatting color = this.isAnyQueen() ? ChatFormatting.GOLD : ChatFormatting.GREEN;
+            this.setCustomName(Component.literal(given.isEmpty() ? profName : given + " [" + profName + "]").withStyle(color));
+        }
+        this.setCustomNameVisible(true);
     }
 
     public boolean isDefender() {
@@ -1595,6 +1707,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         // 2. Al despertar por cualquier causa, tomar inmediatamente su armadura del soporte asignado
         this.goalSelector.addGoal(2, new KoboldRetrieveArmorGoal(this));
+
+        // 2. Metas de gobernante: Seguir al dueño o mantener posición asignada
+        this.goalSelector.addGoal(2, new KoboldFollowOwnerGoal(this, 1.25D));
+        this.goalSelector.addGoal(2, new KoboldGuardPositionGoal(this, 1.05D));
 
         // 3. Dormir en su cama asignada durante la noche (suspendido durante duelos de reinas)
         this.goalSelector.addGoal(3, new KoboldSleepInBedGoal(this));
@@ -2971,7 +3087,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 }
             }
 
-            ItemStack breadStack = new ItemStack(Items.BREAD, breadToCraft);
+            int outputBread = this.getProfessionTier() >= 2 ? breadToCraft * 2 : breadToCraft;
+            ItemStack breadStack = new ItemStack(Items.BREAD, outputBread);
             ItemStack leftover = this.inventory.addItem(breadStack);
             if (!leftover.isEmpty() && this.level() instanceof ServerLevel serverLevel) {
                 this.spawnAtLocation(serverLevel, leftover);
@@ -5043,7 +5160,155 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             return InteractionResult.SUCCESS;
         }
 
-        // 5.2. Clic derecho con comida: Alimentar si tiene hambre o guardar en mochila si está llena
+        // 5.2. Asignación de Nombre personalizado con Etiqueta (Name Tag)
+        if (itemInHand.is(Items.NAME_TAG) && itemInHand.has(DataComponents.CUSTOM_NAME)) {
+            if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                Component customNameComp = itemInHand.get(DataComponents.CUSTOM_NAME);
+                if (customNameComp != null) {
+                    String rawName = customNameComp.getString();
+                    this.setCustomGivenName(rawName);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.2F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                    }
+                    serverPlayer.sendSystemMessage(Component.literal("§aHas nombrado a esta Kobold como: §e" + rawName));
+                }
+            }
+            return InteractionResult.SUCCESS;
+        }
+
+        // 5.3. Mejora / Ascenso de Profesión a Rango Veterana (Tier 2 ⭐) entregando Esmeralda o Diamante
+        if (!this.isAnyQueen() && (itemInHand.is(Items.EMERALD) || itemInHand.is(Items.DIAMOND))) {
+            if (this.getProfession() != KoboldProfession.NONE) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    if (this.getProfessionTier() < 2) {
+                        this.setProfessionTier(2);
+                        if (!player.getAbilities().instabuild) {
+                            itemInHand.shrink(1);
+                        }
+                        this.playSound(SoundEvents.PLAYER_LEVELUP, 1.0F, 1.2F);
+                        if (this.level() instanceof ServerLevel sl) {
+                            sl.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, this.getX(), this.getY() + 1.0D, this.getZ(), 16, 0.4D, 0.5D, 0.4D, 0.1D);
+                        }
+                        String name = this.getCustomGivenName().isEmpty() ? this.getProfession().getDisplayName() : this.getCustomGivenName();
+                        serverPlayer.sendSystemMessage(Component.literal("§6¡" + name + " ha ascendido a Rango Veterana (Tier 2 ⭐)! Ahora desempeñará sus labores con maestría y eficiencia mejorada."));
+                    } else {
+                        serverPlayer.sendSystemMessage(Component.literal("§eEsta súbdita ya ostenta el máximo rango de veteranía."));
+                    }
+                }
+                return InteractionResult.SUCCESS;
+            }
+        }
+
+        // 5.4. Reasignación dinámica de profesiones a súbditas entregando herramientas de trabajo
+        if (!this.isAnyQueen()) {
+            if (isHoe(itemInHand) && this.getProfession() != KoboldProfession.FARMER) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    this.setProfession(KoboldProfession.FARMER);
+                    ItemStack toStore = itemInHand.copy();
+                    toStore.setCount(1);
+                    this.inventory.addItem(toStore);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.VILLAGER_WORK_FARMER, 1.0F, 1.0F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                    }
+                    String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
+                    serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eGranjera§a de la tribu."));
+                }
+                return InteractionResult.SUCCESS;
+            } else if ((itemInHand.getItem() instanceof BowItem || itemInHand.getItem() instanceof CrossbowItem) && this.getProfession() != KoboldProfession.HUNTER) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    this.setProfession(KoboldProfession.HUNTER);
+                    ItemStack toStore = itemInHand.copy();
+                    toStore.setCount(1);
+                    this.inventory.addItem(toStore);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.ARMOR_EQUIP_GENERIC.value(), 1.0F, 1.0F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                    }
+                    String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
+                    serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eCazadora§a de la tribu."));
+                }
+                return InteractionResult.SUCCESS;
+            } else if ((itemInHand.getItem() instanceof SwordItem || itemInHand.getItem() instanceof MaceItem || itemInHand.getItem() instanceof TridentItem || isShield(itemInHand)) && this.getProfession() != KoboldProfession.GUARD) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    this.setProfession(KoboldProfession.GUARD);
+                    ItemStack toStore = itemInHand.copy();
+                    toStore.setCount(1);
+                    this.inventory.addItem(toStore);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.ARMOR_EQUIP_GENERIC.value(), 1.0F, 1.0F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                    }
+                    String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
+                    serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eGuardia§a defensora de la tribu."));
+                }
+                return InteractionResult.SUCCESS;
+            } else if ((itemInHand.is(Items.TORCH) || itemInHand.is(Items.SPYGLASS)) && this.getProfession() != KoboldProfession.VIGILANT) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    this.setProfession(KoboldProfession.VIGILANT);
+                    ItemStack toStore = itemInHand.copy();
+                    toStore.setCount(1);
+                    this.inventory.addItem(toStore);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.ARMOR_EQUIP_GENERIC.value(), 1.0F, 1.0F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                    }
+                    String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
+                    serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eVigilante§a de la tribu."));
+                }
+                return InteractionResult.SUCCESS;
+            }
+        }
+
+        // 5.5. Clic derecho con mano vacía:
+        // Si es la Reina -> Abrir Menú de Gobernación Tribal
+        // Si es una súbdita -> Alternar Postura de Mando (RUTINA -> SEGUIR -> GUARDIA)
+        if (itemInHand.isEmpty()) {
+            if (this.isAnyQueen()) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(this.getId(), this.getTribeName(), this.getQueenTitle(), true));
+                }
+                return InteractionResult.SUCCESS;
+            } else {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    CommandStance current = this.getCommandStance();
+                    CommandStance next = switch (current) {
+                        case WORK -> CommandStance.FOLLOW;
+                        case FOLLOW -> CommandStance.GUARD;
+                        case GUARD -> CommandStance.WORK;
+                    };
+                    this.setCommandStance(next);
+                    if (next == CommandStance.GUARD) {
+                        this.setGuardPosition(this.blockPosition());
+                    }
+                    String name = this.getCustomGivenName().isEmpty() ? this.getProfession().getDisplayName() : this.getCustomGivenName();
+                    serverPlayer.sendSystemMessage(Component.literal("§e" + name + " §7ahora está en postura: §f" + next.getIcon() + " §6" + next.getDisplayName()), true);
+                    this.playSound(next == CommandStance.FOLLOW ? SoundEvents.BELL_BLOCK : (next == CommandStance.GUARD ? SoundEvents.ARMOR_EQUIP_GENERIC.value() : SoundEvents.VILLAGER_YES), 1.0F, 1.2F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 6, 0.25D, 0.25D, 0.25D, 0.05D);
+                    }
+                }
+                return InteractionResult.SUCCESS;
+            }
+        }
+
+        // 5.6. Clic derecho con comida: Alimentar si tiene hambre o guardar en mochila si está llena
         FoodProperties food = itemInHand.get(DataComponents.FOOD);
         if (food != null) {
             if (this.needsFood()) {
@@ -5072,7 +5337,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             }
         }
 
-        // 5.3. Clic derecho con armadura: Equipar directamente en su slot de armadura
+        // 5.7. Clic derecho con armadura: Equipar directamente en su slot de armadura
         Equippable equippable = itemInHand.get(DataComponents.EQUIPPABLE);
         if (equippable != null && equippable.slot().isArmor()) {
             EquipmentSlot slot = equippable.slot();
@@ -5096,7 +5361,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             return InteractionResult.SUCCESS;
         }
 
-        // 5.4. Clic derecho con arma, herramienta (azada) o escudo: Guardar en el inventario/mochila sin desgastar
+        // 5.8. Clic derecho con arma, herramienta (azada) o escudo: Guardar en el inventario/mochila sin desgastar
         if (isWeapon(itemInHand) || isHoe(itemInHand) || isShield(itemInHand)) {
             if (!this.level().isClientSide()) {
                 ItemStack toStore = itemInHand.copy();
@@ -5122,7 +5387,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             return InteractionResult.SUCCESS;
         }
 
-        // 5.5. Clic derecho con mano vacía u otros ítems: Diálogo de lealtad
+        // 5.9. Clic derecho con mano vacía u otros ítems: Diálogo de lealtad
         if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
             this.speakToPlayer(serverPlayer);
         }
@@ -5316,7 +5581,167 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 this.setTradingPlayer(player);
                 this.openTradingScreen(player, Component.literal("Desarrollo: " + this.getTribeName()), 1);
             }
+            case QueenDialogueActionPayload.ACTION_RULER_CALL_ALL_FOLLOW -> {
+                this.broadcastCommandStance(player, CommandStance.FOLLOW);
+            }
+            case QueenDialogueActionPayload.ACTION_RULER_CALL_ALL_WORK -> {
+                this.broadcastCommandStance(player, CommandStance.WORK);
+            }
+            case QueenDialogueActionPayload.ACTION_RULER_CALL_ALL_GUARD -> {
+                this.broadcastCommandStance(player, CommandStance.GUARD);
+            }
+            case QueenDialogueActionPayload.ACTION_RULER_COLLECT_TRIBUTES -> {
+                this.collectTributesForRuler(player);
+            }
+            case QueenDialogueActionPayload.ACTION_RULER_TRIBE_REPORT -> {
+                this.sendTribeReportToRuler(player);
+            }
         }
+    }
+
+    public void broadcastCommandStance(ServerPlayer player, CommandStance stance) {
+        if (player == null || !(this.level() instanceof ServerLevel serverLevel)) return;
+        List<KoboldGirlEntity> tribe = serverLevel.getEntitiesOfClass(
+                KoboldGirlEntity.class,
+                this.getBoundingBox().inflate(64.0D),
+                k -> k.isAlive() && k.isOwnedBy(player) && Objects.equals(k.getTribeName(), this.getTribeName())
+        );
+        int count = 0;
+        for (KoboldGirlEntity girl : tribe) {
+            if (girl.isAnyQueen()) continue;
+            girl.setCommandStance(stance);
+            if (stance == CommandStance.GUARD) {
+                girl.setGuardPosition(girl.blockPosition());
+            }
+            serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER, girl.getX(), girl.getY() + 1.2D, girl.getZ(), 4, 0.2D, 0.2D, 0.2D, 0.05D);
+            count++;
+        }
+        String orderText = switch (stance) {
+            case FOLLOW -> "¡Toda la tribu, sigan a nuestro gobernante!";
+            case WORK -> "¡Todas a sus puestos! Continúen con sus labores cotidianas.";
+            case GUARD -> "¡Toda la tribu en guardia! Defiendan el territorio de la tribu.";
+        };
+        Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+        player.sendSystemMessage(speaker.copy().append(Component.literal(orderText + " (§e" + count + " súbditas recibieron la orden§f)").withStyle(ChatFormatting.YELLOW)));
+        this.playSound(SoundEvents.BELL_BLOCK, 1.0F, 1.0F);
+    }
+
+    public void collectTributesForRuler(ServerPlayer player) {
+        if (player == null || !(this.level() instanceof ServerLevel serverLevel)) return;
+        long now = serverLevel.getGameTime();
+        if (this.lastTributeTime != 0 && (now - this.lastTributeTime) < 24000L) {
+            long remainingTicks = 24000L - (now - this.lastTributeTime);
+            int minutes = (int) Math.ceil(remainingTicks / 1200.0D);
+            Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+            Component msg = Component.literal("Mis súbditas aún están reuniendo las cosechas y recursos del día. Vuelve en un rato (~" + minutes + " min restantes).")
+                    .withStyle(ChatFormatting.AQUA);
+            player.sendSystemMessage(speaker.copy().append(msg));
+            this.playSound(SoundEvents.VILLAGER_NO, 1.0F, 1.0F);
+            return;
+        }
+
+        List<KoboldGirlEntity> tribe = serverLevel.getEntitiesOfClass(
+                KoboldGirlEntity.class,
+                this.getBoundingBox().inflate(64.0D),
+                k -> k.isAlive() && k.isOwnedBy(player) && Objects.equals(k.getTribeName(), this.getTribeName())
+        );
+
+        int farmers = 0, hunters = 0, guards = 0, vigilants = 0, tier2Count = 0;
+        for (KoboldGirlEntity k : tribe) {
+            if (k.isAnyQueen()) continue;
+            switch (k.getProfession()) {
+                case FARMER -> farmers++;
+                case HUNTER -> hunters++;
+                case GUARD -> guards++;
+                case VIGILANT -> vigilants++;
+                default -> {}
+            }
+            if (k.getProfessionTier() >= 2) tier2Count++;
+        }
+
+        this.lastTributeTime = now;
+        List<ItemStack> tributes = new ArrayList<>();
+
+        // Granjeras aportan pan, trigo y zanahorias
+        int breadCount = Math.max(2, farmers * 3 + (tier2Count * 2));
+        tributes.add(new ItemStack(Items.BREAD, Math.min(64, breadCount)));
+        tributes.add(new ItemStack(Items.WHEAT, Math.min(64, Math.max(4, farmers * 4))));
+        if (farmers > 0) {
+            tributes.add(new ItemStack(Items.CARROT, Math.min(64, Math.max(2, farmers * 3))));
+        }
+
+        // Cazadoras aportan carne cocinada y cuero
+        int meatCount = Math.max(2, hunters * 3 + (tier2Count * 2));
+        tributes.add(new ItemStack(Items.COOKED_BEEF, Math.min(64, meatCount)));
+        if (hunters > 0) {
+            tributes.add(new ItemStack(Items.LEATHER, Math.min(64, Math.max(2, hunters * 2))));
+        }
+
+        // Guardias y Vigilantes aportan flechas, hierro y esmeraldas
+        int defenders = guards + vigilants;
+        int arrowCount = Math.max(4, defenders * 4);
+        tributes.add(new ItemStack(Items.ARROW, Math.min(64, arrowCount)));
+        int ironCount = Math.max(1, defenders * 2 + tier2Count);
+        tributes.add(new ItemStack(Items.IRON_INGOT, Math.min(64, ironCount)));
+        if (tier2Count > 0 || tribe.size() >= 3) {
+            tributes.add(new ItemStack(Items.EMERALD, Math.min(16, Math.max(1, tier2Count + tribe.size() / 3))));
+        }
+
+        for (ItemStack stack : tributes) {
+            if (!player.getInventory().add(stack)) {
+                player.drop(stack, false);
+            }
+        }
+
+        Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+        Component msg = Component.literal("Aquí tienes el tributo diario y las riquezas producidas por nuestra tribu, honorable gobernante.")
+                .withStyle(ChatFormatting.GREEN);
+        player.sendSystemMessage(speaker.copy().append(msg));
+        this.playSound(SoundEvents.PLAYER_LEVELUP, 1.0F, 1.0F);
+        serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 16, 0.4D, 0.4D, 0.4D, 0.05D);
+    }
+
+    public void sendTribeReportToRuler(ServerPlayer player) {
+        if (player == null || !(this.level() instanceof ServerLevel serverLevel)) return;
+        List<KoboldGirlEntity> tribe = serverLevel.getEntitiesOfClass(
+                KoboldGirlEntity.class,
+                this.getBoundingBox().inflate(64.0D),
+                k -> k.isAlive() && k.isOwnedBy(player) && Objects.equals(k.getTribeName(), this.getTribeName())
+        );
+
+        int farmers = 0, hunters = 0, guards = 0, vigilants = 0, unassigned = 0, tier2Count = 0;
+        int following = 0, guarding = 0, working = 0;
+
+        for (KoboldGirlEntity k : tribe) {
+            if (k.isAnyQueen()) continue;
+            switch (k.getProfession()) {
+                case FARMER -> farmers++;
+                case HUNTER -> hunters++;
+                case GUARD -> guards++;
+                case VIGILANT -> vigilants++;
+                case NONE -> unassigned++;
+            }
+            if (k.getProfessionTier() >= 2) tier2Count++;
+            switch (k.getCommandStance()) {
+                case FOLLOW -> following++;
+                case GUARD -> guarding++;
+                case WORK -> working++;
+            }
+        }
+
+        player.sendSystemMessage(Component.literal("§6========================================"));
+        player.sendSystemMessage(Component.literal("§e📜 CENSO Y ESTADO DE LA TRIBU: §f" + this.getTribeName()));
+        player.sendSystemMessage(Component.literal("§7Reina regente: §6" + this.getQueenTitle()));
+        player.sendSystemMessage(Component.literal("§7Población leal: §a" + tribe.size() + " Kobolds"));
+        player.sendSystemMessage(Component.literal("§a  🌾 Granjeras: " + farmers + " | 🏹 Cazadoras: " + hunters));
+        player.sendSystemMessage(Component.literal("§9  🛡 Guardias: " + guards + " | 👁 Vigilantes: " + vigilants));
+        if (unassigned > 0) {
+            player.sendSystemMessage(Component.literal("§8  ❔ Súbditas sin asignar: " + unassigned));
+        }
+        player.sendSystemMessage(Component.literal("§d⭐ Súbditas Veteranas (Tier 2): " + tier2Count));
+        player.sendSystemMessage(Component.literal("§bPosturas actuales: §f🚶 Siguiendo: " + following + " | 🛡 En Guardia: " + guarding + " | 🌾 En Labores: " + working));
+        player.sendSystemMessage(Component.literal("§6========================================"));
+        this.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.0F);
     }
 
     public void startPlayerDominanceDuel(Player player) {
@@ -6891,6 +7316,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             if (this.kobold.isSleeping() || this.kobold.isThreatened() || this.kobold.isHunting()) {
                 return false;
             }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
+                return false;
+            }
             // Granjeras o la Reina colaborando en labores agrícolas
             if (this.kobold.getProfession() != KoboldProfession.FARMER && !this.kobold.isAnyQueen()) {
                 return false;
@@ -6908,6 +7336,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         @Override
         public boolean canContinueToUse() {
             if (this.kobold.isSleeping() || this.kobold.isThreatened() || this.kobold.isHunting()) {
+                return false;
+            }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
                 return false;
             }
             if (this.kobold.getProfession() != KoboldProfession.FARMER && !this.kobold.isAnyQueen()) {
@@ -7133,6 +7564,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             if (this.kobold.isSleeping() || this.kobold.isInPowerStruggle()) {
                 return false;
             }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
+                return false;
+            }
             if (this.kobold.getProfession() != KoboldProfession.HUNTER && !this.kobold.isAnyQueen()) {
                 return false;
             }
@@ -7153,6 +7587,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         @Override
         public boolean canContinueToUse() {
             if (this.kobold.isSleeping() || this.kobold.isInPowerStruggle()) {
+                return false;
+            }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
                 return false;
             }
             if (this.kobold.getProfession() != KoboldProfession.HUNTER && !this.kobold.isAnyQueen()) {
@@ -7252,6 +7689,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             if (this.kobold.isSleeping() || this.kobold.isThreatened() || this.kobold.isInPowerStruggle()) {
                 return false;
             }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
+                return false;
+            }
             if (this.kobold.getProfession() != KoboldProfession.HUNTER) {
                 return false;
             }
@@ -7268,6 +7708,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         @Override
         public boolean canContinueToUse() {
             if (this.kobold.isSleeping() || this.kobold.isThreatened() || this.kobold.isInPowerStruggle()) {
+                return false;
+            }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
                 return false;
             }
             if (!this.kobold.hasRawMeatInInventory()) {
@@ -7409,6 +7852,139 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 return this.mob.canFightKobold(koboldThreat);
             }
             return this.mob.canAttack(threat);
+        }
+    }
+
+    // Meta del gobernante: Sigue fielmente al dueño / rey si está en postura FOLLOW
+    public static class KoboldFollowOwnerGoal extends Goal {
+        private final KoboldGirlEntity mob;
+        private LivingEntity owner;
+        private final double speedModifier;
+        private int timeToRecalcPath;
+        private float oldWaterCost;
+
+        public KoboldFollowOwnerGoal(KoboldGirlEntity mob, double speedModifier) {
+            this.mob = mob;
+            this.speedModifier = speedModifier;
+            this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+        }
+
+        @Override
+        public boolean canUse() {
+            if (!this.mob.isOwned() || this.mob.isRebel() || !this.mob.isAlive() || this.mob.isSleeping()) {
+                return false;
+            }
+            if (this.mob.getCommandStance() != CommandStance.FOLLOW) {
+                return false;
+            }
+            if (this.mob.isInQueenDuel() || this.mob.isInPlayerDuel() || this.mob.isInPowerStruggle()) {
+                return false;
+            }
+            Player owner = this.mob.getOwner();
+            if (owner == null || owner.isSpectator()) {
+                return false;
+            }
+            if (this.mob.distanceToSqr(owner) < 9.0D) {
+                return false;
+            }
+            if (this.mob.getTarget() != null && this.mob.getTarget().isAlive() && this.mob.distanceToSqr(owner) < 64.0D) {
+                return false;
+            }
+            this.owner = owner;
+            return true;
+        }
+
+        @Override
+        public boolean canContinueToUse() {
+            if (this.mob.getNavigation().isDone()) {
+                return false;
+            }
+            if (this.mob.getCommandStance() != CommandStance.FOLLOW) {
+                return false;
+            }
+            if (!this.mob.isOwned() || this.mob.isRebel() || !this.mob.isAlive() || this.mob.isSleeping()) {
+                return false;
+            }
+            return this.owner != null && this.mob.distanceToSqr(this.owner) > 4.0D;
+        }
+
+        @Override
+        public void start() {
+            this.timeToRecalcPath = 0;
+            this.oldWaterCost = this.mob.getPathfindingMalus(PathType.WATER);
+            this.mob.setPathfindingMalus(PathType.WATER, 0.0F);
+        }
+
+        @Override
+        public void stop() {
+            this.owner = null;
+            this.mob.getNavigation().stop();
+            this.mob.setPathfindingMalus(PathType.WATER, this.oldWaterCost);
+        }
+
+        @Override
+        public void tick() {
+            if (this.owner == null) return;
+            this.mob.getLookControl().setLookAt(this.owner, 10.0F, (float) this.mob.getMaxHeadXRot());
+            if (--this.timeToRecalcPath <= 0) {
+                this.timeToRecalcPath = 10;
+                double distSqr = this.mob.distanceToSqr(this.owner);
+                if (distSqr >= 256.0D) {
+                    this.teleportToOwner();
+                } else {
+                    this.mob.getNavigation().moveTo(this.owner, this.speedModifier);
+                }
+            }
+        }
+
+        private void teleportToOwner() {
+            BlockPos ownerPos = this.owner.blockPosition();
+            for (int i = 0; i < 10; i++) {
+                int dx = this.mob.getRandom().nextIntBetweenInclusive(-3, 3);
+                int dz = this.mob.getRandom().nextIntBetweenInclusive(-3, 3);
+                int dy = this.mob.getRandom().nextIntBetweenInclusive(-1, 1);
+                if (Math.abs(dx) >= 2 || Math.abs(dz) >= 2) {
+                    BlockPos targetPos = ownerPos.offset(dx, dy, dz);
+                    if (KoboldGirlEntity.isBedSideStandable(this.mob.level(), targetPos)) {
+                        this.mob.moveTo(targetPos.getX() + 0.5D, targetPos.getY(), targetPos.getZ() + 0.5D, this.mob.getYRot(), this.mob.getXRot());
+                        this.mob.getNavigation().stop();
+                        if (this.mob.level() instanceof ServerLevel sl) {
+                            sl.sendParticles(ParticleTypes.PORTAL, this.mob.getX(), this.mob.getY() + 0.8D, this.mob.getZ(), 10, 0.3D, 0.4D, 0.3D, 0.05D);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // Meta del gobernante: Mantener posición vigilando cuando está en postura GUARD
+    public static class KoboldGuardPositionGoal extends Goal {
+        private final KoboldGirlEntity mob;
+        private final double speedModifier;
+
+        public KoboldGuardPositionGoal(KoboldGirlEntity mob, double speedModifier) {
+            this.mob = mob;
+            this.speedModifier = speedModifier;
+            this.setFlags(EnumSet.of(Goal.Flag.MOVE));
+        }
+
+        @Override
+        public boolean canUse() {
+            if (!this.mob.isOwned() || this.mob.isRebel() || !this.mob.isAlive() || this.mob.isSleeping()) return false;
+            if (this.mob.getCommandStance() != CommandStance.GUARD) return false;
+            if (this.mob.getTarget() != null && this.mob.getTarget().isAlive()) return false;
+            BlockPos guardPos = this.mob.getGuardPosition();
+            if (guardPos == null) return false;
+            return this.mob.distanceToSqr(Vec3.atBottomCenterOf(guardPos)) > 16.0D;
+        }
+
+        @Override
+        public void start() {
+            BlockPos guardPos = this.mob.getGuardPosition();
+            if (guardPos != null) {
+                this.mob.getNavigation().moveTo(guardPos.getX() + 0.5D, guardPos.getY(), guardPos.getZ() + 0.5D, this.speedModifier);
+            }
         }
     }
 
@@ -8473,6 +9049,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             if (this.mob.sleepCooldown > 0 || this.mob.isInPowerStruggle()) {
                 return false;
             }
+            if (this.mob.isOwned() && this.mob.getCommandStance() == CommandStance.FOLLOW) {
+                return false;
+            }
             if (this.mob.isInQueenDuel() || getNearbyQueenDuel(this.mob.level(), this.mob.position(), 24.0D) != null) {
                 return false;
             }
@@ -8496,6 +9075,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         @Override
         public boolean canContinueToUse() {
             if (this.mob.sleepCooldown > 0 || this.mob.isInPowerStruggle()) {
+                return false;
+            }
+            if (this.mob.isOwned() && this.mob.getCommandStance() == CommandStance.FOLLOW) {
                 return false;
             }
             if (this.mob.isInQueenDuel() || getNearbyQueenDuel(this.mob.level(), this.mob.position(), 24.0D) != null) {
@@ -8783,6 +9365,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             if (this.kobold.isSleeping() || this.kobold.isThreatened() || this.kobold.isHunting()) {
                 return false;
             }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
+                return false;
+            }
             if (this.searchCooldown > 0) {
                 this.searchCooldown--;
                 return false;
@@ -8801,6 +9386,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         @Override
         public boolean canContinueToUse() {
             if (this.kobold.isSleeping() || this.kobold.isThreatened() || this.kobold.isHunting()) {
+                return false;
+            }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
                 return false;
             }
             if (this.currentTask == null || this.currentTask.chestPos == null) {
@@ -8943,6 +9531,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         @Override
         public boolean canUse() {
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
+                return false;
+            }
             // Guardias y Vigilantes patrullan de forma activa y continua los caminos con KoboldPatrolPathsGoal
             if (this.kobold.isDefender()) {
                 return false;
@@ -9015,6 +9606,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         @Override
         public boolean canUse() {
+            if (this.mob.isOwned() && this.mob.getCommandStance() != CommandStance.WORK) {
+                return false;
+            }
             // Solo para Guardias, Vigilantes y la Reina de la tribu
             if (!this.mob.isDefender() && !this.mob.isAnyQueen()) {
                 return false;
@@ -9613,6 +10207,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (this.getProfession() == KoboldProfession.GUARD && isMeleeWeapon(weapon)) {
             damage *= 1.05F;
         }
+        if (this.getProfessionTier() >= 2) {
+            damage *= 1.25F;
+        }
 
         DamageSource damageSource = this.damageSources().mobAttack(this);
         damage = EnchantmentHelper.modifyDamage(level, this.getWeaponItem(), target, damageSource, damage);
@@ -9640,6 +10237,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     @Override
     public boolean hurtServer(ServerLevel level, DamageSource damageSource, float amount) {
+        // Reducción de daño para súbditas veteranas Tier 2
+        if (this.getProfessionTier() >= 2) {
+            amount *= 0.8F;
+        }
         // Las Kobold Girl espectadoras son totalmente invulnerables mientras el duelo está activo
         if (this.isSpectatingDuel()) {
             level.sendParticles(ParticleTypes.ENCHANTED_HIT, this.getX(), this.getY() + 0.8D, this.getZ(), 6, 0.2D, 0.3D, 0.2D, 0.05D);
@@ -9759,6 +10360,18 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (this.pacifistOffers != null) {
             output.store("Offers", MerchantOffers.CODEC, this.pacifistOffers);
         }
+        output.putString("CommandStance", this.getCommandStance().name());
+        output.putString("CustomGivenName", this.getCustomGivenName());
+        output.putInt("ProfessionTier", this.getProfessionTier());
+        output.putLong("LastTributeTime", this.lastTributeTime);
+        if (this.guardPosition != null) {
+            output.putBoolean("HasGuardPos", true);
+            output.putInt("GuardX", this.guardPosition.getX());
+            output.putInt("GuardY", this.guardPosition.getY());
+            output.putInt("GuardZ", this.guardPosition.getZ());
+        } else {
+            output.putBoolean("HasGuardPos", false);
+        }
     }
 
     @Override
@@ -9813,6 +10426,19 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         this.pacifistRouteChosen = input.getBooleanOr("PacifistRouteChosen", false);
         this.completedPacifistTrades = input.getIntOr("CompletedPacifistTrades", 0);
         this.pacifistOffers = input.read("Offers", MerchantOffers.CODEC).orElse(null);
+
+        this.setCommandStance(CommandStance.fromString(input.getStringOr("CommandStance", "WORK")));
+        this.setCustomGivenName(input.getStringOr("CustomGivenName", ""));
+        this.setProfessionTier(input.getIntOr("ProfessionTier", 1));
+        this.lastTributeTime = input.getLongOr("LastTributeTime", 0L);
+        if (input.getBooleanOr("HasGuardPos", false)) {
+            int gx = input.getIntOr("GuardX", 0);
+            int gy = input.getIntOr("GuardY", 0);
+            int gz = input.getIntOr("GuardZ", 0);
+            this.setGuardPosition(new BlockPos(gx, gy, gz));
+        } else {
+            this.setGuardPosition(null);
+        }
     }
 
     /* =========================================================================
