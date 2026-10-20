@@ -1,0 +1,33 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="newcolleaguemod"
+version="1.0.0"
+displayName="New Colleague"
+authors="Jhon"
+description='''
+New Colleague Mod featuring custom GeckoLib animated entities.
+'''
+
+[[dependencies.newcolleaguemod]]
+    modId="neoforge"
+    type="required"
+    versionRange="[26.2.0.90, 27.0.0)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.newcolleaguemod]]
+    modId="minecraft"
+    type="required"
+    versionRange="[26.2, 27.0)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.newcolleaguemod]]
+    modId="geckolib"
+    type="required"
+    versionRange="[5.5.0,)"
+    ordering="NONE"
+    side="BOTH"

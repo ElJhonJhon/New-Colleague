@@ -1,0 +1,7 @@
+{
+  "entity.newcolleaguemod.kobold_girl": "Chica Kobold",
+  "entity.newcolleaguemod.kobold_girl.inventory": "Inventario de Chica Kobold",
+  "item.newcolleaguemod.kobold_girl_spawn_egg": "Huevo generador de Chica Kobold",
+  "item.newcolleaguemod.baculo": "Báculo",
+  "itemGroup.newcolleaguemod": "New Colleague"
+}

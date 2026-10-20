@@ -1,0 +1,9 @@
+{
+  "model": {
+    "type": "minecraft:special",
+    "base": "newcolleaguemod:item/baculo",
+    "model": {
+      "type": "geckolib:geckolib"
+    }
+  }
+}

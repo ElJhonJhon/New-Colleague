@@ -1,0 +1,92 @@
+{
+	"format_version": "1.21.110",
+	"minecraft:geometry": [
+		{
+			"description": {
+				"identifier": "geometry.unknown",
+				"texture_width": 32,
+				"texture_height": 32,
+				"visible_bounds_width": 2,
+				"visible_bounds_height": 2.5,
+				"visible_bounds_offset": [0, 0.75, 0]
+			},
+			"bones": [
+				{
+					"name": "baculo",
+					"pivot": [-0.5, 7, 0.5],
+					"cubes": [
+						{
+							"origin": [-3, 14, -2],
+							"size": [5, 1, 5],
+							"uv": {
+								"north": {"uv": [11, 8], "uv_size": [5, 1]},
+								"east": {"uv": [11, 9], "uv_size": [5, 1]},
+								"south": {"uv": [11, 10], "uv_size": [5, 1]},
+								"west": {"uv": [11, 11], "uv_size": [5, 1]},
+								"up": {"uv": [5, 5], "uv_size": [-5, -5]},
+								"down": {"uv": [5, 10], "uv_size": [-5, -5]}
+							}
+						},
+						{
+							"origin": [-1.5, 2, -0.5],
+							"size": [2, 12, 2],
+							"uv": {
+								"north": {"uv": [5, 0], "uv_size": [2, 12]},
+								"east": {"uv": [7, 0], "uv_size": [2, 12]},
+								"south": {"uv": [9, 0], "uv_size": [2, 12]},
+								"west": {"uv": [0, 10], "uv_size": [2, 12]},
+								"up": {"uv": [14, 14], "uv_size": [-2, -2]},
+								"down": {"uv": [4, 16], "uv_size": [-2, -2]}
+							}
+						},
+						{
+							"origin": [-2.5, 1, -1.5],
+							"size": [4, 1, 4],
+							"uv": {
+								"north": {"uv": [4, 14], "uv_size": [4, 1]},
+								"east": {"uv": [8, 14], "uv_size": [4, 1]},
+								"south": {"uv": [12, 14], "uv_size": [4, 1]},
+								"west": {"uv": [14, 12], "uv_size": [4, 1]},
+								"up": {"uv": [15, 4], "uv_size": [-4, -4]},
+								"down": {"uv": [15, 8], "uv_size": [-4, -4]}
+							}
+						},
+						{
+							"origin": [-1.3, -0.6, -0.3],
+							"size": [1.6, 1.6, 1.6],
+							"uv": {
+								"north": {"uv": [15, 0], "uv_size": [2, 2]},
+								"east": {"uv": [15, 2], "uv_size": [2, 2]},
+								"south": {"uv": [4, 15], "uv_size": [2, 2]},
+								"west": {"uv": [15, 4], "uv_size": [2, 2]},
+								"up": {"uv": [8, 17], "uv_size": [-2, -2]},
+								"down": {"uv": [17, 8], "uv_size": [-2, -2]}
+							}
+						}
+					]
+				},
+				{
+					"name": "orbe",
+					"parent": "baculo",
+					"pivot": [-0.5, 17, 0.5],
+					"cubes": [
+						{
+							"origin": [-1.5, 16, -0.5],
+							"size": [2, 2, 2],
+							"pivot": [-0.5, 17, 0.5],
+							"rotation": [-90, -45, 125],
+							"uv": {
+								"north": {"uv": [16, 16], "uv_size": [16, 16]},
+								"east": {"uv": [16, 16], "uv_size": [16, 16]},
+								"south": {"uv": [16, 16], "uv_size": [16, 16]},
+								"west": {"uv": [16, 16], "uv_size": [16, 16]},
+								"up": {"uv": [16, 16], "uv_size": [16, 16]},
+								"down": {"uv": [16, 16], "uv_size": [16, 16]}
+							}
+						}
+					]
+				}
+			]
+		}
+	]
+}

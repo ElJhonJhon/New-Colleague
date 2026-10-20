@@ -1,0 +1,24 @@
+# Gradle
+.gradle/
+build/
+
+# Minecraft run directory (saves, logs, configs generados, screenshots)
+run/
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+bin/
+.settings/
+.classpath
+.project
+
+# Archivos de sistema operativo
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Logs
+*.log
+*.log.gz
