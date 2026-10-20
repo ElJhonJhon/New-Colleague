@@ -8225,8 +8225,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 return false;
             }
             KoboldGirlEntity queen = this.mob.getTribeQueen();
-            // Si la reina está viva y la rebelde se alejó a más de 15 bloques de la reina, activar para regresar hacia ella
-            if (queen != null && queen.isAlive() && this.mob.distanceTo(queen) > 15.0D) {
+            // Si la reina está viva y la rebelde se alejó a más de 150 bloques de la reina, activar para regresar hacia ella
+            if (queen != null && queen.isAlive() && this.mob.distanceTo(queen) > 150.0D) {
                 return true;
             }
             // Buscar al jugador más cercano en un radio de 14 bloques
@@ -8272,11 +8272,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
             KoboldGirlEntity queen = this.mob.getTribeQueen();
 
-            // 1. REGLA ESTRICTA DE PROXIMIDAD: No separarse a más de 15 bloques de la Reina
+            // 1. REGLA ESTRICTA DE PROXIMIDAD: No separarse a más de 150 bloques de la Reina
             // "esas rebeldes que rechazan AL JUGADOR no se deben separar de la reina a mas de 15 bloques"
             if (queen != null && queen.isAlive()) {
                 double distToQueen = this.mob.distanceTo(queen);
-                if (distToQueen > 15.0D) {
+                if (distToQueen > 150.0D) {
                     if (this.mob.getTarget() != null && this.mob.getTarget() instanceof Player) {
                         this.mob.setTarget(null);
                         this.mob.unequipHands();
