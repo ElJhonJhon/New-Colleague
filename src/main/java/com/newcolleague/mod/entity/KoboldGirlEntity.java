@@ -5308,7 +5308,17 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (itemInHand.isEmpty()) {
             if (this.isAnyQueen()) {
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+<<<<<<< HEAD
                     PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(this.getId(), this.getQueenTitle(), this.getTribeName(), this.isPacifistRouteChosen(), this.isOwnedBy(serverPlayer)));
+=======
+                    PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(
+                            this.getId(),
+                            this.getQueenTitle(),
+                            this.getTribeName(),
+                            this.isPacifistRouteChosen(),
+                            true
+                    ));
+>>>>>>> 3295d3bc3b0ee8c8f2367fe73a78f9fe5e229c25
                 }
                 return InteractionResult.SUCCESS;
             } else {
@@ -7975,7 +7985,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 if (Math.abs(dx) >= 2 || Math.abs(dz) >= 2) {
                     BlockPos targetPos = ownerPos.offset(dx, dy, dz);
                     if (KoboldGirlEntity.isBedSideStandable(this.mob.level(), targetPos)) {
+<<<<<<< HEAD
                         this.mob.setPos(targetPos.getX() + 0.5D, targetPos.getY(), targetPos.getZ() + 0.5D);
+=======
+                        this.mob.teleportTo(targetPos.getX() + 0.5D, (double) targetPos.getY(), targetPos.getZ() + 0.5D);
+>>>>>>> 3295d3bc3b0ee8c8f2367fe73a78f9fe5e229c25
                         this.mob.getNavigation().stop();
                         if (this.mob.level() instanceof ServerLevel sl) {
                             sl.sendParticles(ParticleTypes.PORTAL, this.mob.getX(), this.mob.getY() + 0.8D, this.mob.getZ(), 10, 0.3D, 0.4D, 0.3D, 0.05D);
