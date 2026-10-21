@@ -26,7 +26,7 @@ import com.newcolleague.mod.network.QueenDialogueActionPayload;
 import com.newcolleague.mod.network.OpenQueenDialoguePayload;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.minecraft.world.item.HoeItem;
-import net.minecraft.world.item.SwordItem;
+
 import net.minecraft.world.item.NameTagItem;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -1231,6 +1231,14 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     public MerchantOffers getOffers() {
         if (this.pacifistOffers == null) {
             this.pacifistOffers = createPacifistOffers();
+        } else {
+            // Migrar ofertas previas si contenían la antigua pepita de oro
+            for (MerchantOffer offer : this.pacifistOffers) {
+                if (offer.getResult().is(Items.GOLD_NUGGET)) {
+                    this.pacifistOffers = createPacifistOffers();
+                    break;
+                }
+            }
         }
         return this.pacifistOffers;
     }
@@ -1248,6 +1256,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         this.completedPacifistTrades++;
 
         if (this.tradingPlayer instanceof ServerPlayer serverPlayer) {
+            // Recompensa de 5 niveles de experiencia por cada misión de tributo completada
+            serverPlayer.giveExperienceLevels(5);
+            serverPlayer.playSound(SoundEvents.PLAYER_LEVELUP, 0.8F, 1.2F);
+
             int completed = countCompletedOffers();
             int total = this.getOffers().size();
 
@@ -1265,15 +1277,17 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
             if (this.level() instanceof ServerLevel serverLevel) {
                 serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 10, 0.4D, 0.4D, 0.4D, 0.05D);
+                serverLevel.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, serverPlayer.getX(), serverPlayer.getY() + 1.0D, serverPlayer.getZ(), 16, 0.35D, 0.5D, 0.35D, 0.08D);
             }
 
             Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
             if (completed < total) {
                 int percent = completed * 10;
-                Component progressMsg = Component.literal("¡Gran ofrenda para nuestro pueblo! Confianza: " + percent + "% (" + completed + "/" + total + " tributos).")
+                Component progressMsg = Component.literal("¡Gran ofrenda para nuestro pueblo! Confianza: " + percent + "% (" + completed + "/" + total + " tributos). ¡Has recibido +5 niveles de experiencia!")
                         .withStyle(ChatFormatting.GREEN);
                 serverPlayer.sendSystemMessage(speaker.copy().append(progressMsg));
             } else {
+                serverPlayer.sendSystemMessage(speaker.copy().append(Component.literal("¡Tributo final recibido! ¡Has obtenido +5 niveles de experiencia!").withStyle(ChatFormatting.GREEN)));
                 this.resolvePlayerPacifistVictory(serverPlayer);
             }
         }
@@ -1482,11 +1496,12 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             net.minecraft.world.level.ItemLike itemB, int countB,
             String tributeName, String description) {
 
-        ItemStack reward = new ItemStack(Items.GOLD_NUGGET, 1);
-        reward.set(DataComponents.CUSTOM_NAME, Component.literal("Punto de Confianza: " + tributeName)
-                .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+        ItemStack reward = new ItemStack(Items.EXPERIENCE_BOTTLE, 1);
+        reward.set(DataComponents.CUSTOM_NAME, Component.literal("Bendición de Sabiduría: " + tributeName)
+                .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
         reward.set(DataComponents.LORE, new ItemLore(List.of(
                 Component.literal(description).withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC),
+                Component.literal("⭐ Recompensa: +5 Niveles de Experiencia").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD),
                 Component.literal("+10% Confianza y Alianza con la Reina Kobold").withStyle(ChatFormatting.YELLOW),
                 Component.literal("Sello de gratitud y respeto tribal").withStyle(ChatFormatting.DARK_GREEN)
         )));
@@ -5239,7 +5254,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eCazadora§a de la tribu."));
                 }
                 return InteractionResult.SUCCESS;
-            } else if ((itemInHand.getItem() instanceof SwordItem || itemInHand.getItem() instanceof MaceItem || itemInHand.getItem() instanceof TridentItem || isShield(itemInHand)) && this.getProfession() != KoboldProfession.GUARD) {
+            } else if ((itemInHand.is(ItemTags.SWORDS) || itemInHand.is(Items.MACE) || itemInHand.is(Items.TRIDENT) || isShield(itemInHand)) && this.getProfession() != KoboldProfession.GUARD) {
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
                     this.setProfession(KoboldProfession.GUARD);
                     ItemStack toStore = itemInHand.copy();
@@ -5282,7 +5297,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (itemInHand.isEmpty()) {
             if (this.isAnyQueen()) {
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
-                    PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(this.getId(), this.getTribeName(), this.getQueenTitle(), true));
+                    PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(this.getId(), this.getQueenTitle(), this.getTribeName(), this.isPacifistRouteChosen(), this.isOwnedBy(serverPlayer)));
                 }
                 return InteractionResult.SUCCESS;
             } else {
@@ -7946,7 +7961,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 if (Math.abs(dx) >= 2 || Math.abs(dz) >= 2) {
                     BlockPos targetPos = ownerPos.offset(dx, dy, dz);
                     if (KoboldGirlEntity.isBedSideStandable(this.mob.level(), targetPos)) {
-                        this.mob.moveTo(targetPos.getX() + 0.5D, targetPos.getY(), targetPos.getZ() + 0.5D, this.mob.getYRot(), this.mob.getXRot());
+                        this.mob.setPos(targetPos.getX() + 0.5D, targetPos.getY(), targetPos.getZ() + 0.5D);
                         this.mob.getNavigation().stop();
                         if (this.mob.level() instanceof ServerLevel sl) {
                             sl.sendParticles(ParticleTypes.PORTAL, this.mob.getX(), this.mob.getY() + 0.8D, this.mob.getZ(), 10, 0.3D, 0.4D, 0.3D, 0.05D);
