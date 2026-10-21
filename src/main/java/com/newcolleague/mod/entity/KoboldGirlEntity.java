@@ -25,9 +25,12 @@ import com.newcolleague.mod.item.BaculoEventHandler;
 import com.newcolleague.mod.network.QueenDialogueActionPayload;
 import com.newcolleague.mod.network.OpenQueenDialoguePayload;
 import net.neoforged.neoforge.network.PacketDistributor;
+<<<<<<< HEAD
 import net.minecraft.world.item.HoeItem;
 
 import net.minecraft.world.item.NameTagItem;
+=======
+>>>>>>> 12722f1127a91f93bc40ab0c16b7beb22ce7a7cd
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -5237,7 +5240,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eGranjera§a de la tribu."));
                 }
                 return InteractionResult.SUCCESS;
-            } else if ((itemInHand.getItem() instanceof BowItem || itemInHand.getItem() instanceof CrossbowItem) && this.getProfession() != KoboldProfession.HUNTER) {
+            } else if (isRangedWeapon(itemInHand) && this.getProfession() != KoboldProfession.HUNTER) {
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
                     this.setProfession(KoboldProfession.HUNTER);
                     ItemStack toStore = itemInHand.copy();
@@ -5254,7 +5257,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eCazadora§a de la tribu."));
                 }
                 return InteractionResult.SUCCESS;
+<<<<<<< HEAD
             } else if ((itemInHand.is(ItemTags.SWORDS) || itemInHand.is(Items.MACE) || itemInHand.is(Items.TRIDENT) || isShield(itemInHand)) && this.getProfession() != KoboldProfession.GUARD) {
+=======
+            } else if ((itemInHand.is(ItemTags.SWORDS) || itemInHand.is(ItemTags.AXES) || isMace(itemInHand) || isSpear(itemInHand) || isShield(itemInHand)) && this.getProfession() != KoboldProfession.GUARD) {
+>>>>>>> 12722f1127a91f93bc40ab0c16b7beb22ce7a7cd
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
                     this.setProfession(KoboldProfession.GUARD);
                     ItemStack toStore = itemInHand.copy();
