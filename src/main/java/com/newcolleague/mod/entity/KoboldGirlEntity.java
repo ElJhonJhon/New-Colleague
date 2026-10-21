@@ -26,12 +26,8 @@ import com.newcolleague.mod.item.BaculoItem;
 import com.newcolleague.mod.network.QueenDialogueActionPayload;
 import com.newcolleague.mod.network.OpenQueenDialoguePayload;
 import net.neoforged.neoforge.network.PacketDistributor;
-<<<<<<< HEAD
 import net.minecraft.world.item.HoeItem;
-
 import net.minecraft.world.item.NameTagItem;
-=======
->>>>>>> 12722f1127a91f93bc40ab0c16b7beb22ce7a7cd
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -159,6 +155,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     // Aquí las animaciones
     private static final RawAnimation IDLE_ANIM = RawAnimation.begin().thenLoop("idle");
     private static final RawAnimation WALK_ANIM = RawAnimation.begin().thenLoop("walk");
+    private static final RawAnimation SLEEP_ANIM = RawAnimation.begin().thenLoop("sleep");
+    private static final RawAnimation SWORD_ATTACK_ANIM = RawAnimation.begin().thenPlay("swordattack");
+    private static final RawAnimation AXE_ATTACK_ANIM = RawAnimation.begin().thenPlay("axeattack");
 
     // Mecanica de Hambre y Saturación
     private static final EntityDataAccessor<Integer> DATA_FOOD_LEVEL =
@@ -4573,6 +4572,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         return 0.0D;
     }
 
+    public static boolean isSword(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        return stack.is(ItemTags.SWORDS);
+    }
+
     public static boolean isAxe(ItemStack stack) {
         if (stack.isEmpty()) return false;
         return stack.is(ItemTags.AXES);
@@ -5261,11 +5265,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eCazadora§a de la tribu."));
                 }
                 return InteractionResult.SUCCESS;
-<<<<<<< HEAD
             } else if ((itemInHand.is(ItemTags.SWORDS) || itemInHand.is(Items.MACE) || itemInHand.is(Items.TRIDENT) || isShield(itemInHand)) && this.getProfession() != KoboldProfession.GUARD) {
-=======
-            } else if ((itemInHand.is(ItemTags.SWORDS) || itemInHand.is(ItemTags.AXES) || isMace(itemInHand) || isSpear(itemInHand) || isShield(itemInHand)) && this.getProfession() != KoboldProfession.GUARD) {
->>>>>>> 12722f1127a91f93bc40ab0c16b7beb22ce7a7cd
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
                     this.setProfession(KoboldProfession.GUARD);
                     ItemStack toStore = itemInHand.copy();
@@ -5308,9 +5308,6 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (itemInHand.isEmpty()) {
             if (this.isAnyQueen()) {
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
-<<<<<<< HEAD
-                    PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(this.getId(), this.getQueenTitle(), this.getTribeName(), this.isPacifistRouteChosen(), this.isOwnedBy(serverPlayer)));
-=======
                     PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(
                             this.getId(),
                             this.getQueenTitle(),
@@ -5318,7 +5315,6 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                             this.isPacifistRouteChosen(),
                             true
                     ));
->>>>>>> 3295d3bc3b0ee8c8f2367fe73a78f9fe5e229c25
                 }
                 return InteractionResult.SUCCESS;
             } else {
@@ -6882,7 +6878,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                             this.mob.stopUsingItem();
                         }
                         boolean wasAlive = target.isAlive();
-                        this.mob.doHurtTarget(serverLevel, target);
+                        this.mob.swing(InteractionHand.MAIN_HAND);
+                    this.mob.doHurtTarget(serverLevel, target);
                         if (wasAlive && (!target.isAlive() || target.getHealth() <= 0.0F)) {
                             this.mob.onSlainTargetDrops(serverLevel, target);
                         }
@@ -6903,6 +6900,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                         this.mob.stopUsingItem();
                     }
                     boolean wasAlive = target.isAlive();
+                    this.mob.swing(InteractionHand.MAIN_HAND);
                     this.mob.doHurtTarget(serverLevel, target);
                     if (wasAlive && (!target.isAlive() || target.getHealth() <= 0.0F)) {
                         this.mob.onSlainTargetDrops(serverLevel, target);
@@ -6933,12 +6931,13 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                         this.mob.stopUsingItem();
                     }
                     boolean wasAlive = target.isAlive();
+                    this.mob.swing(InteractionHand.MAIN_HAND);
                     this.mob.doHurtTarget(serverLevel, target);
                     if (wasAlive && (!target.isAlive() || target.getHealth() <= 0.0F)) {
                         this.mob.onSlainTargetDrops(serverLevel, target);
                     }
                     if (held.is(ItemTags.AXES)) {
-                        this.attackCooldown = 24;
+                        this.attackCooldown = 28;
                         double kx = target.getX() - this.mob.getX();
                         double kz = target.getZ() - this.mob.getZ();
                         target.knockback(0.4D, -kx, -kz, this.mob.damageSources().mobAttack(this.mob), 1.0F);
@@ -7985,11 +7984,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 if (Math.abs(dx) >= 2 || Math.abs(dz) >= 2) {
                     BlockPos targetPos = ownerPos.offset(dx, dy, dz);
                     if (KoboldGirlEntity.isBedSideStandable(this.mob.level(), targetPos)) {
-<<<<<<< HEAD
-                        this.mob.setPos(targetPos.getX() + 0.5D, targetPos.getY(), targetPos.getZ() + 0.5D);
-=======
                         this.mob.teleportTo(targetPos.getX() + 0.5D, (double) targetPos.getY(), targetPos.getZ() + 0.5D);
->>>>>>> 3295d3bc3b0ee8c8f2367fe73a78f9fe5e229c25
                         this.mob.getNavigation().stop();
                         if (this.mob.level() instanceof ServerLevel sl) {
                             sl.sendParticles(ParticleTypes.PORTAL, this.mob.getX(), this.mob.getY() + 0.8D, this.mob.getZ(), 10, 0.3D, 0.4D, 0.3D, 0.05D);
@@ -10243,6 +10238,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 return false;
             }
         }
+        this.swing(InteractionHand.MAIN_HAND);
         this.addExhaustion(0.3F);
 
         float damage = (float) this.getAttributeValue(Attributes.ATTACK_DAMAGE);
@@ -10488,14 +10484,41 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
        ANIMACIONES GECKOLIB
        ========================================================================= */
 
+    private int lastAttackAnimTick = -1;
+
+    @Override
+    public void swing(InteractionHand hand, boolean updateSelf) {
+        super.swing(hand, updateSelf);
+        if (hand == InteractionHand.MAIN_HAND) {
+            this.triggerAttackAnimation();
+        }
+    }
+
+    public void triggerAttackAnimation() {
+        if (this.isSleeping() || this.level().isClientSide()) {
+            return;
+        }
+        if (this.tickCount == this.lastAttackAnimTick) {
+            return;
+        }
+        this.lastAttackAnimTick = this.tickCount;
+
+        ItemStack mainHand = this.getMainHandItem();
+        String anim = isAxe(mainHand) ? "axeattack" : "swordattack";
+        this.triggerAnim("attack", anim);
+    }
+
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
         controllers.add(new AnimationController<>("movement", 5, this::movementPredicate));
+        controllers.add(new AnimationController<>("attack", 2, state -> PlayState.STOP)
+                .triggerableAnim("swordattack", SWORD_ATTACK_ANIM)
+                .triggerableAnim("axeattack", AXE_ATTACK_ANIM));
     }
 
     private PlayState movementPredicate(AnimationTest<KoboldGirlEntity> state) {
         if (this.isSleeping()) {
-            return PlayState.STOP;
+            return state.setAndContinue(SLEEP_ANIM);
         }
         if (state.isMoving()) {
             return state.setAndContinue(WALK_ANIM);
