@@ -25,6 +25,10 @@ import com.newcolleague.mod.item.BaculoEventHandler;
 import com.newcolleague.mod.item.BaculoItem;
 import com.newcolleague.mod.network.QueenDialogueActionPayload;
 import com.newcolleague.mod.network.OpenQueenDialoguePayload;
+import com.newcolleague.mod.village.VillageTier;
+import com.newcolleague.mod.village.VillageProject;
+import com.newcolleague.mod.village.StructureBlueprint;
+import net.minecraft.tags.BlockTags;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -200,6 +204,15 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     private static final EntityDataAccessor<Integer> DATA_PROFESSION_TIER =
             SynchedEntityData.defineId(KoboldGirlEntity.class, EntityDataSerializers.INT);
 
+    // Nivel de prosperidad y desarrollo de la aldea tribal (0 a 300+)
+    private static final EntityDataAccessor<Integer> DATA_PROSPERITY =
+            SynchedEntityData.defineId(KoboldGirlEntity.class, EntityDataSerializers.INT);
+
+    // Sistema de Aldea, Expansión, Nivelación de Terreno y Construcción
+    private @Nullable VillageProject activeVillageProject = null;
+    private int builtStructuresCount = 0;
+    private @Nullable BlockPos campCenterPos = null;
+
     // Posturas de mando disponibles para el gobernante
     public enum CommandStance {
         WORK("Rutina de Tribu", "🌾"),
@@ -245,7 +258,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         FARMER("Granjera"),
         GUARD("Guardia"),
         VIGILANT("Vigilante"),
-        HUNTER("Cazadora");
+        HUNTER("Cazadora"),
+        BUILDER("Constructora");
 
         private final String displayName;
 
@@ -556,6 +570,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (this.isSleeping()) {
             this.setDeltaMovement(Vec3.ZERO);
         }
+        if (!this.level().isClientSide() && this.isAnyQueen() && this.tickCount % 20 == 0) {
+            this.serverVillageTick();
+        }
     }
 
     @Override
@@ -573,6 +590,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         builder.define(DATA_COMMAND_STANCE, CommandStance.WORK.name());
         builder.define(DATA_CUSTOM_GIVEN_NAME, "");
         builder.define(DATA_PROFESSION_TIER, 1);
+        builder.define(DATA_PROSPERITY, 0);
     }
 
     // Toda esta parte es para la generación de la tribu y su nombre
@@ -802,6 +820,340 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     public void setProfessionTier(int tier) {
         this.entityData.set(DATA_PROFESSION_TIER, Math.max(1, tier));
         this.updateRulerCustomName();
+    }
+
+    public int getProsperity() {
+        return this.entityData.get(DATA_PROSPERITY);
+    }
+
+    public void setProsperity(int prosperity) {
+        int oldTierLevel = this.getVillageTier().getLevel();
+        this.entityData.set(DATA_PROSPERITY, Math.max(0, prosperity));
+        int newTierLevel = this.getVillageTier().getLevel();
+        if (newTierLevel > oldTierLevel && !this.level().isClientSide()) {
+            this.onVillageTierUpgraded(this.getVillageTier());
+        }
+    }
+
+    public void addProsperity(int amount) {
+        this.setProsperity(this.getProsperity() + amount);
+    }
+
+    public VillageTier getVillageTier() {
+        int p = this.getProsperity();
+        if (p >= VillageTier.DIAMOND_FORTRESS.getRequiredProsperity()) {
+            return VillageTier.DIAMOND_FORTRESS;
+        } else if (p >= VillageTier.ESTABLISHED.getRequiredProsperity()) {
+            return VillageTier.ESTABLISHED;
+        } else {
+            return VillageTier.NOMAD;
+        }
+    }
+
+    public void onVillageTierUpgraded(VillageTier newTier) {
+        if (!(this.level() instanceof ServerLevel serverLevel)) return;
+
+        serverLevel.playSound(null, this.getX(), this.getY(), this.getZ(),
+                SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.NEUTRAL, 1.2F, 1.0F);
+        serverLevel.playSound(null, this.getX(), this.getY(), this.getZ(),
+                SoundEvents.PLAYER_LEVELUP, SoundSource.NEUTRAL, 1.0F, 1.2F);
+        serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.5D, this.getZ(),
+                25, 0.8D, 0.8D, 0.8D, 0.1D);
+
+        String tribe = this.getTribeName().isEmpty() ? "Tribu Kobold" : this.getTribeName();
+        Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+        Component announcement = Component.literal("¡Nuestra tribu ha prosperado! Hemos alcanzado el rango de ")
+                .withStyle(ChatFormatting.YELLOW)
+                .append(Component.literal(newTier.getIcon() + " " + newTier.getDisplayName()).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD))
+                .append(Component.literal("!").withStyle(ChatFormatting.YELLOW));
+
+        Player owner = this.getOwner();
+        if (owner instanceof ServerPlayer sp) {
+            sp.sendSystemMessage(speaker.copy().append(announcement));
+        } else {
+            for (ServerPlayer nearby : serverLevel.getPlayers(p -> p.distanceToSqr(this) <= 2304.0D)) {
+                nearby.sendSystemMessage(speaker.copy().append(announcement));
+            }
+        }
+
+        this.updateEquipmentForVillageTier(newTier);
+    }
+
+    public void updateEquipmentForVillageTier(VillageTier tier) {
+        if (!(this.level() instanceof ServerLevel serverLevel)) return;
+
+        if (this.isAnyQueen()) {
+            switch (tier) {
+                case NOMAD -> {}
+                case ESTABLISHED -> {
+                    if (this.getItemBySlot(EquipmentSlot.HEAD).isEmpty()) {
+                        this.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.GOLDEN_HELMET));
+                    }
+                    if (this.getItemBySlot(EquipmentSlot.CHEST).isEmpty()) {
+                        this.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
+                    }
+                    if (this.getItemBySlot(EquipmentSlot.LEGS).isEmpty()) {
+                        this.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
+                    }
+                    if (this.getItemBySlot(EquipmentSlot.FEET).isEmpty()) {
+                        this.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.IRON_BOOTS));
+                    }
+                    if (this.getItemBySlot(EquipmentSlot.MAINHAND).isEmpty()) {
+                        this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_SWORD));
+                    }
+                }
+                case DIAMOND_FORTRESS -> {
+                    this.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
+                    this.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.DIAMOND_CHESTPLATE));
+                    this.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.DIAMOND_LEGGINGS));
+                    this.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.DIAMOND_BOOTS));
+                    this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.DIAMOND_SWORD));
+                    this.playSound(SoundEvents.ARMOR_EQUIP_DIAMOND.value(), 1.0F, 1.0F);
+                }
+            }
+        }
+
+        List<KoboldGirlEntity> tribeMembers = serverLevel.getEntitiesOfClass(
+                KoboldGirlEntity.class,
+                this.getBoundingBox().inflate(64.0D),
+                k -> k.isAlive() && Objects.equals(k.getTribeName(), this.getTribeName())
+        );
+
+        for (KoboldGirlEntity member : tribeMembers) {
+            if (member.isAnyQueen()) continue;
+            if (member.isDefender() || member.getProfession() == KoboldProfession.GUARD || member.getProfession() == KoboldProfession.VIGILANT) {
+                if (tier == VillageTier.DIAMOND_FORTRESS) {
+                    member.setProfessionTier(2);
+                    member.equipEliteGuardEquipment(true);
+                } else if (tier == VillageTier.ESTABLISHED) {
+                    if (member.getProfessionTier() >= 2) {
+                        member.equipEliteGuardEquipment(false);
+                    } else {
+                        member.equipStandardGuardEquipment();
+                    }
+                }
+            }
+        }
+    }
+
+    public void equipEliteGuardEquipment(boolean isDiamondFortress) {
+        int variant = Math.abs(this.getUUID().hashCode()) % 4;
+        switch (variant) {
+            case 0 -> {
+                this.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.DIAMOND_CHESTPLATE));
+                this.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
+                this.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
+                this.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.CHAINMAIL_BOOTS));
+                this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.DIAMOND_SWORD));
+                this.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
+            }
+            case 1 -> {
+                this.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.DIAMOND_HELMET));
+                this.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.CHAINMAIL_CHESTPLATE));
+                this.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
+                this.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.DIAMOND_BOOTS));
+                this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(isDiamondFortress ? Items.DIAMOND_SWORD : Items.IRON_SWORD));
+                this.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
+            }
+            case 2 -> {
+                this.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.DIAMOND_LEGGINGS));
+                this.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
+                this.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
+                this.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.IRON_BOOTS));
+                this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.DIAMOND_SWORD));
+            }
+            case 3 -> {
+                this.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.DIAMOND_BOOTS));
+                this.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.IRON_CHESTPLATE));
+                this.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.CHAINMAIL_HELMET));
+                this.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.IRON_LEGGINGS));
+                if (this.getProfession() == KoboldProfession.VIGILANT) {
+                    this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.BOW));
+                } else {
+                    this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.DIAMOND_SWORD));
+                    this.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.SHIELD));
+                }
+            }
+        }
+        this.playSound(SoundEvents.ARMOR_EQUIP_DIAMOND.value(), 1.0F, 1.0F);
+    }
+
+    public void equipStandardGuardEquipment() {
+        if (this.getItemBySlot(EquipmentSlot.HEAD).isEmpty()) {
+            this.setItemSlot(EquipmentSlot.HEAD, new ItemStack(Items.IRON_HELMET));
+        }
+        if (this.getItemBySlot(EquipmentSlot.CHEST).isEmpty()) {
+            this.setItemSlot(EquipmentSlot.CHEST, new ItemStack(Items.CHAINMAIL_CHESTPLATE));
+        }
+        if (this.getItemBySlot(EquipmentSlot.LEGS).isEmpty()) {
+            this.setItemSlot(EquipmentSlot.LEGS, new ItemStack(Items.CHAINMAIL_LEGGINGS));
+        }
+        if (this.getItemBySlot(EquipmentSlot.FEET).isEmpty()) {
+            this.setItemSlot(EquipmentSlot.FEET, new ItemStack(Items.IRON_BOOTS));
+        }
+        if (this.getItemBySlot(EquipmentSlot.MAINHAND).isEmpty()) {
+            this.setItemSlot(EquipmentSlot.MAINHAND, new ItemStack(Items.IRON_SWORD));
+        }
+    }
+
+    public @Nullable VillageProject getActiveVillageProject() {
+        return this.activeVillageProject;
+    }
+
+    public void setActiveVillageProject(@Nullable VillageProject project) {
+        this.activeVillageProject = project;
+    }
+
+    public @Nullable BlockPos getCampCenterPos() {
+        return this.campCenterPos != null ? this.campCenterPos : this.blockPosition();
+    }
+
+    public void setCampCenterPos(@Nullable BlockPos pos) {
+        this.campCenterPos = pos;
+    }
+
+    public BlockPos calculateStructureOrigin(StructureBlueprint.StructureType type, int structureIndex) {
+        BlockPos center = this.getCampCenterPos();
+        int ox = 0, oz = 0;
+
+        switch (structureIndex) {
+            case 0 -> { ox = 0; oz = 0; }
+            case 1 -> { ox = 8; oz = 0; }
+            case 2 -> { ox = -8; oz = 0; }
+            case 3 -> { ox = 0; oz = 8; }
+            case 4 -> { ox = 0; oz = -8; }
+            case 5 -> { ox = 8; oz = 8; }
+            case 6 -> { ox = 12; oz = 12; }
+            case 7 -> { ox = -12; oz = -12; }
+            case 8 -> { ox = -8; oz = 8; }
+            default -> {
+                int ring = (structureIndex - 8);
+                ox = (ring % 2 == 0 ? 14 : -14);
+                oz = (ring > 2 ? 14 : -14);
+            }
+        }
+
+        int testX = center.getX() + ox;
+        int testZ = center.getZ() + oz;
+        int surfaceY = this.level().getHeight(Heightmap.Types.WORLD_SURFACE, testX, testZ);
+        BlockPos surfacePos = new BlockPos(testX, surfaceY, testZ);
+        while (surfacePos.getY() > this.level().getMinY() && (this.level().getBlockState(surfacePos).isAir() || this.level().getBlockState(surfacePos).is(BlockTags.LEAVES))) {
+            surfacePos = surfacePos.below();
+        }
+        int targetY = Math.max(this.level().getMinY() + 1, surfacePos.getY());
+        return new BlockPos(testX, targetY, testZ);
+    }
+
+    public boolean startNewVillageProject(StructureBlueprint.StructureType type) {
+        if (this.activeVillageProject != null && !this.activeVillageProject.isCompleted()) {
+            return false;
+        }
+        BlockPos origin = this.calculateStructureOrigin(type, this.builtStructuresCount);
+        this.activeVillageProject = new VillageProject(type, origin);
+
+        if (this.level() instanceof ServerLevel sl) {
+            sl.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.BELL_BLOCK, SoundSource.NEUTRAL, 1.0F, 0.9F);
+            sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, origin.getX() + 2.5D, origin.getY() + 1.0D, origin.getZ() + 2.5D, 16, 1.5D, 0.5D, 1.5D, 0.05D);
+        }
+
+        Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+        Component msg = Component.literal("¡Iniciando la construcción de: ")
+                .withStyle(ChatFormatting.YELLOW)
+                .append(Component.literal(type.getDisplayName()).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD))
+                .append(Component.literal("! Nuestras constructoras aplanarán el terreno y comenzarán las obras.").withStyle(ChatFormatting.YELLOW));
+
+        Player owner = this.getOwner();
+        if (owner instanceof ServerPlayer sp) {
+            sp.sendSystemMessage(speaker.copy().append(msg));
+        }
+        return true;
+    }
+
+    public void onStructureCompleted(VillageProject project) {
+        if (!(this.level() instanceof ServerLevel sl)) return;
+
+        this.builtStructuresCount++;
+        this.addProsperity(35);
+
+        sl.playSound(null, this.getX(), this.getY(), this.getZ(),
+                SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.NEUTRAL, 1.2F, 1.0F);
+        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.5D, this.getZ(),
+                30, 1.0D, 1.0D, 1.0D, 0.1D);
+
+        String structName = project.getStructureType().getDisplayName();
+        Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+        Component msg = Component.literal("¡Nuestra tribu ha completado la construcción de: ")
+                .withStyle(ChatFormatting.GREEN)
+                .append(Component.literal(structName).withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD))
+                .append(Component.literal("! La prosperidad de la aldea aumenta a §e" + this.getProsperity() + "§a pts."));
+
+        Player owner = this.getOwner();
+        if (owner instanceof ServerPlayer sp) {
+            sp.sendSystemMessage(speaker.copy().append(msg));
+        } else {
+            for (ServerPlayer nearby : sl.getPlayers(p -> p.distanceToSqr(this) <= 2304.0D)) {
+                nearby.sendSystemMessage(speaker.copy().append(msg));
+            }
+        }
+
+        this.activeVillageProject = null;
+    }
+
+    public void serverVillageTick() {
+        if (!this.isAnyQueen() || this.level().isClientSide()) return;
+
+        // 1. Ganancia de prosperidad pasiva cada 600 ticks (~30 segundos)
+        if (this.tickCount % 600 == 0) {
+            int bonus = 1;
+            List<KoboldGirlEntity> tribe = this.level().getEntitiesOfClass(
+                    KoboldGirlEntity.class,
+                    this.getBoundingBox().inflate(64.0D),
+                    k -> k.isAlive() && Objects.equals(k.getTribeName(), this.getTribeName())
+            );
+            boolean hasFarmer = false, hasHunter = false, hasGuard = false;
+            for (KoboldGirlEntity k : tribe) {
+                if (k.getProfession() == KoboldProfession.FARMER) hasFarmer = true;
+                if (k.getProfession() == KoboldProfession.HUNTER) hasHunter = true;
+                if (k.isDefender()) hasGuard = true;
+            }
+            if (hasFarmer) bonus++;
+            if (hasHunter) bonus++;
+            if (hasGuard) bonus++;
+            this.addProsperity(bonus);
+        }
+
+        // 2. Comprobar inicio o avance de proyectos de expansión cada 200 ticks (~10s)
+        if (this.tickCount % 200 == 0) {
+            if (this.activeVillageProject == null) {
+                VillageTier tier = this.getVillageTier();
+                StructureBlueprint.StructureType nextType = null;
+                if (this.builtStructuresCount == 0) {
+                    nextType = StructureBlueprint.StructureType.CAMPFIRE_BASE;
+                } else if (this.builtStructuresCount == 1) {
+                    nextType = StructureBlueprint.StructureType.TENT;
+                } else if (this.builtStructuresCount == 2) {
+                    nextType = StructureBlueprint.StructureType.TENT;
+                } else if (tier.getLevel() >= 2 && this.builtStructuresCount == 3) {
+                    nextType = StructureBlueprint.StructureType.FARM;
+                } else if (tier.getLevel() >= 2 && this.builtStructuresCount == 4) {
+                    nextType = StructureBlueprint.StructureType.STOREHOUSE;
+                } else if (tier.getLevel() >= 2 && this.builtStructuresCount == 5) {
+                    nextType = StructureBlueprint.StructureType.TENT;
+                } else if (tier.getLevel() >= 3 && this.builtStructuresCount == 6) {
+                    nextType = StructureBlueprint.StructureType.WATCHTOWER;
+                } else if (tier.getLevel() >= 3 && this.builtStructuresCount == 7) {
+                    nextType = StructureBlueprint.StructureType.WATCHTOWER;
+                } else if (tier.getLevel() >= 3 && this.builtStructuresCount >= 8 && this.builtStructuresCount < 12) {
+                    nextType = (this.builtStructuresCount % 2 == 0) ? StructureBlueprint.StructureType.WATCHTOWER : StructureBlueprint.StructureType.STOREHOUSE;
+                }
+
+                if (nextType != null) {
+                    this.startNewVillageProject(nextType);
+                }
+            } else if (this.activeVillageProject.isCompleted()) {
+                this.onStructureCompleted(this.activeVillageProject);
+            }
+        }
     }
 
     public @Nullable BlockPos getGuardPosition() {
@@ -1739,6 +2091,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         // 9. Cosechar activamente cultivos 100% maduros y sembrar tierra arada (Exclusivo Granjeras)
         this.goalSelector.addGoal(9, new HarvestCropGoal(this, 1.15D));
+
+        // 10. Aplanar terreno, nivelar y construir estructuras tribales (Constructoras y súbditas en trabajo)
+        this.goalSelector.addGoal(10, new KoboldVillageBuildGoal(this, 1.15D));
 
         // 10. Cocinar carne cruda en fogatas (Exclusivo Cazadoras)
         this.goalSelector.addGoal(10, new KoboldCookMeatAtCampfireGoal(this, 1.15D));
@@ -5181,9 +5536,24 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             return InteractionResult.SUCCESS;
         }
 
-        // 5.3. Mejora / Ascenso de Profesión a Rango Veterana (Tier 2 ⭐) entregando Esmeralda o Diamante
-        if (!this.isAnyQueen() && (itemInHand.is(Items.EMERALD) || itemInHand.is(Items.DIAMOND))) {
-            if (this.getProfession() != KoboldProfession.NONE) {
+        // 5.3. Mejora / Ascenso de Profesión a Rango Veterana (Tier 2 ⭐) o donación a la Reina
+        if (itemInHand.is(Items.EMERALD) || itemInHand.is(Items.DIAMOND)) {
+            if (this.isAnyQueen()) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    int boost = itemInHand.is(Items.DIAMOND) ? 50 : 15;
+                    this.addProsperity(boost);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.PLAYER_LEVELUP, 1.0F, 1.2F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 16, 0.4D, 0.5D, 0.4D, 0.1D);
+                    }
+                    Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+                    serverPlayer.sendSystemMessage(speaker.copy().append(Component.literal("Agradezco tu generosa ofrenda (+§e" + boost + "§a prosperidad para la aldea). Prosperidad actual: §e" + this.getProsperity() + "§a pts (§b" + this.getVillageTier().getDisplayName() + "§a).")));
+                }
+                return InteractionResult.SUCCESS;
+            } else if (this.getProfession() != KoboldProfession.NONE) {
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
                     if (this.getProfessionTier() < 2) {
                         this.setProfessionTier(2);
@@ -5195,7 +5565,12 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                             sl.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, this.getX(), this.getY() + 1.0D, this.getZ(), 16, 0.4D, 0.5D, 0.4D, 0.1D);
                         }
                         String name = this.getCustomGivenName().isEmpty() ? this.getProfession().getDisplayName() : this.getCustomGivenName();
-                        serverPlayer.sendSystemMessage(Component.literal("§6¡" + name + " ha ascendido a Rango Veterana (Tier 2 ⭐)! Ahora desempeñará sus labores con maestría y eficiencia mejorada."));
+                        if (this.getProfession() == KoboldProfession.GUARD || this.getProfession() == KoboldProfession.VIGILANT) {
+                            this.equipEliteGuardEquipment(this.getVillageTier() == VillageTier.DIAMOND_FORTRESS);
+                            serverPlayer.sendSystemMessage(Component.literal("§6¡" + name + " ha ascendido a §bGuardia de Élite (Tier 2 ⭐)§6! Se ha equipado con armadura reforzada con piezas de diamante. 💎"));
+                        } else {
+                            serverPlayer.sendSystemMessage(Component.literal("§6¡" + name + " ha ascendido a Rango Veterana (Tier 2 ⭐)! Ahora desempeñará sus labores con maestría y eficiencia mejorada."));
+                        }
                     } else {
                         serverPlayer.sendSystemMessage(Component.literal("§eEsta súbdita ya ostenta el máximo rango de veteranía."));
                     }
@@ -5272,6 +5647,23 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     }
                     String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
                     serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eVigilante§a de la tribu."));
+                }
+                return InteractionResult.SUCCESS;
+            } else if ((itemInHand.is(ItemTags.PICKAXES) || itemInHand.is(ItemTags.SHOVELS)) && this.getProfession() != KoboldProfession.BUILDER) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    this.setProfession(KoboldProfession.BUILDER);
+                    ItemStack toStore = itemInHand.copy();
+                    toStore.setCount(1);
+                    this.inventory.addItem(toStore);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.STONE_PLACE, 1.0F, 1.0F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                    }
+                    String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
+                    serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eConstructora§a de la tribu. Aplanará el terreno y construirá estructuras."));
                 }
                 return InteractionResult.SUCCESS;
             }
@@ -5603,6 +5995,34 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             case QueenDialogueActionPayload.ACTION_RULER_TRIBE_REPORT -> {
                 this.sendTribeReportToRuler(player);
             }
+            case QueenDialogueActionPayload.ACTION_RULER_EXPANSION_MENU -> {
+                Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+                VillageTier tier = this.getVillageTier();
+                player.sendSystemMessage(speaker.copy().append(Component.literal("Estado del Desarrollo y Expansión Tribal:").withStyle(ChatFormatting.YELLOW)));
+                player.sendSystemMessage(Component.literal("§7Rango de la aldea: §b" + tier.getIcon() + " " + tier.getDisplayName() + " §7(Prosperidad: §e" + this.getProsperity() + "§7/300)"));
+                if (this.activeVillageProject != null) {
+                    String stateStr = !this.activeVillageProject.isTerraformed()
+                            ? "§eAplanando y nivelando terreno para cimientos..."
+                            : "§aEdificando estructura (" + (this.activeVillageProject.getBuildIndex() * 100 / Math.max(1, this.activeVillageProject.getTotalBlocks())) + "%)";
+                    player.sendSystemMessage(Component.literal("§d🏗 Proyecto activo: §f" + this.activeVillageProject.getStructureType().getDisplayName() + " §7- " + stateStr));
+                } else {
+                    player.sendSystemMessage(Component.literal("§aNo hay obras activas en este instante. Nuestras súbditas constructoras están listas."));
+                    StructureBlueprint.StructureType nextType = null;
+                    if (this.builtStructuresCount == 0) nextType = StructureBlueprint.StructureType.CAMPFIRE_BASE;
+                    else if (this.builtStructuresCount <= 2) nextType = StructureBlueprint.StructureType.TENT;
+                    else if (tier.getLevel() >= 2 && this.builtStructuresCount == 3) nextType = StructureBlueprint.StructureType.FARM;
+                    else if (tier.getLevel() >= 2 && this.builtStructuresCount == 4) nextType = StructureBlueprint.StructureType.STOREHOUSE;
+                    else if (tier.getLevel() >= 2 && this.builtStructuresCount == 5) nextType = StructureBlueprint.StructureType.TENT;
+                    else if (tier.getLevel() >= 3 && this.builtStructuresCount <= 7) nextType = StructureBlueprint.StructureType.WATCHTOWER;
+
+                    if (nextType != null) {
+                        this.startNewVillageProject(nextType);
+                    } else {
+                        player.sendSystemMessage(Component.literal("§7Entrega más ofrendas o asigna más súbditas a recolectar para aumentar la prosperidad y desbloquear más planos."));
+                    }
+                }
+                this.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.0F);
+            }
         }
     }
 
@@ -5716,7 +6136,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 k -> k.isAlive() && k.isOwnedBy(player) && Objects.equals(k.getTribeName(), this.getTribeName())
         );
 
-        int farmers = 0, hunters = 0, guards = 0, vigilants = 0, unassigned = 0, tier2Count = 0;
+        int farmers = 0, hunters = 0, guards = 0, vigilants = 0, builders = 0, unassigned = 0, tier2Count = 0;
         int following = 0, guarding = 0, working = 0;
 
         for (KoboldGirlEntity k : tribe) {
@@ -5726,6 +6146,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 case HUNTER -> hunters++;
                 case GUARD -> guards++;
                 case VIGILANT -> vigilants++;
+                case BUILDER -> builders++;
                 case NONE -> unassigned++;
             }
             if (k.getProfessionTier() >= 2) tier2Count++;
@@ -5739,8 +6160,15 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         player.sendSystemMessage(Component.literal("§6========================================"));
         player.sendSystemMessage(Component.literal("§e📜 CENSO Y ESTADO DE LA TRIBU: §f" + this.getTribeName()));
         player.sendSystemMessage(Component.literal("§7Reina regente: §6" + this.getQueenTitle()));
+        player.sendSystemMessage(Component.literal("§7Rango de la aldea: §b" + this.getVillageTier().getIcon() + " " + this.getVillageTier().getDisplayName() + " §7(Prosperidad: §e" + this.getProsperity() + "§7/300)"));
+        if (this.activeVillageProject != null) {
+            String stateStr = !this.activeVillageProject.isTerraformed() ? "§eAplanando y nivelando terreno..." : "§aConstruyendo (" + (this.activeVillageProject.getBuildIndex() * 100 / Math.max(1, this.activeVillageProject.getTotalBlocks())) + "%)";
+            player.sendSystemMessage(Component.literal("§d🏗 Proyecto en curso: §f" + this.activeVillageProject.getStructureType().getDisplayName() + " - " + stateStr));
+        } else {
+            player.sendSystemMessage(Component.literal("§7🏗 Proyecto en curso: §fNinguno (Aldea en paz)"));
+        }
         player.sendSystemMessage(Component.literal("§7Población leal: §a" + tribe.size() + " Kobolds"));
-        player.sendSystemMessage(Component.literal("§a  🌾 Granjeras: " + farmers + " | 🏹 Cazadoras: " + hunters));
+        player.sendSystemMessage(Component.literal("§a  🌾 Granjeras: " + farmers + " | 🏹 Cazadoras: " + hunters + " | 🔨 Constructoras: " + builders));
         player.sendSystemMessage(Component.literal("§9  🛡 Guardias: " + guards + " | 👁 Vigilantes: " + vigilants));
         if (unassigned > 0) {
             player.sendSystemMessage(Component.literal("§8  ❔ Súbditas sin asignar: " + unassigned));
@@ -7306,6 +7734,177 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 if (this.mob.distanceToSqr(this.targetItem) < 2.5D) {
                     if (this.mob.level() instanceof ServerLevel serverLevel) {
                         this.mob.pickUpItem(serverLevel, this.targetItem);
+                    }
+                }
+            }
+        }
+    }
+
+    // Meta: Aplanar y nivelar terreno, y construir estructuras de la aldea tribal
+    public static class KoboldVillageBuildGoal extends net.minecraft.world.entity.ai.goal.Goal {
+        private final KoboldGirlEntity kobold;
+        private final double speedModifier;
+        private @Nullable BlockPos targetPos;
+        private boolean isTerraformingStep;
+        private int workTicks = 0;
+        private int searchCooldown = 0;
+
+        public KoboldVillageBuildGoal(KoboldGirlEntity kobold, double speedModifier) {
+            this.kobold = kobold;
+            this.speedModifier = speedModifier;
+            this.setFlags(java.util.EnumSet.of(Flag.MOVE, Flag.LOOK));
+        }
+
+        @Override
+        public boolean canUse() {
+            if (this.kobold.isSleeping() || this.kobold.isThreatened() || this.kobold.isInQueenDuel() || this.kobold.isInPlayerDuel()) {
+                return false;
+            }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
+                return false;
+            }
+            KoboldProfession prof = this.kobold.getProfession();
+            boolean canBuild = prof == KoboldProfession.BUILDER
+                    || (prof == KoboldProfession.NONE && this.kobold.isOwned() && this.kobold.getCommandStance() == CommandStance.WORK)
+                    || (!this.kobold.isOwned() && !this.kobold.isDefender() && !this.kobold.isAnyQueen());
+            if (!canBuild) return false;
+
+            if (--this.searchCooldown > 0) return false;
+            this.searchCooldown = 20 + this.kobold.getRandom().nextInt(20);
+
+            VillageProject project = this.getProject();
+            if (project == null || project.isCompleted()) return false;
+
+            return this.findTarget(project);
+        }
+
+        private @Nullable VillageProject getProject() {
+            if (this.kobold.isAnyQueen()) {
+                return this.kobold.getActiveVillageProject();
+            }
+            KoboldGirlEntity queen = this.kobold.getTribeQueen();
+            if (queen != null && queen.isAlive()) {
+                return queen.getActiveVillageProject();
+            }
+            return null;
+        }
+
+        private boolean findTarget(VillageProject project) {
+            Level level = this.kobold.level();
+            if (!project.isTerraformed()) {
+                BlockPos terraformPos = project.findNextTerraformTarget(level);
+                if (terraformPos != null) {
+                    this.targetPos = terraformPos;
+                    this.isTerraformingStep = true;
+                    return true;
+                } else {
+                    project.setTerraformed(true);
+                }
+            }
+
+            StructureBlueprint.BlueprintEntry entry = project.getCurrentEntry();
+            if (entry != null) {
+                this.targetPos = project.getWorldPosForEntry(entry);
+                this.isTerraformingStep = false;
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean canContinueToUse() {
+            if (this.kobold.isSleeping() || this.kobold.isThreatened()) return false;
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) return false;
+            VillageProject project = this.getProject();
+            return project != null && !project.isCompleted() && this.targetPos != null;
+        }
+
+        @Override
+        public void start() {
+            this.workTicks = 0;
+            if (this.targetPos != null) {
+                this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
+            }
+        }
+
+        @Override
+        public void stop() {
+            this.targetPos = null;
+            this.workTicks = 0;
+            this.kobold.getNavigation().stop();
+        }
+
+        @Override
+        public void tick() {
+            VillageProject project = this.getProject();
+            if (project == null || project.isCompleted() || this.targetPos == null) return;
+
+            double distSq = this.kobold.distanceToSqr(Vec3.atCenterOf(this.targetPos));
+            this.kobold.getLookControl().setLookAt(this.targetPos.getX() + 0.5D, this.targetPos.getY() + 0.5D, this.targetPos.getZ() + 0.5D, 30.0F, 30.0F);
+
+            if (distSq > 16.0D) {
+                if (this.kobold.getNavigation().isDone() || this.kobold.tickCount % 20 == 0) {
+                    this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
+                }
+                return;
+            }
+
+            this.kobold.getNavigation().stop();
+            this.workTicks++;
+
+            if (this.workTicks % 6 == 0) {
+                this.kobold.swing(InteractionHand.MAIN_HAND);
+            }
+
+            if (this.workTicks >= 20) {
+                this.workTicks = 0;
+                Level level = this.kobold.level();
+                if (!(level instanceof ServerLevel sl)) return;
+
+                if (this.isTerraformingStep) {
+                    BlockState state = level.getBlockState(this.targetPos);
+                    if (VillageProject.isClearableNaturalBlock(state)) {
+                        sl.levelEvent(2001, this.targetPos, net.minecraft.world.level.block.Block.getId(state));
+                        sl.destroyBlock(this.targetPos, false);
+                        this.kobold.playSound(SoundEvents.GRASS_BREAK, 1.0F, 1.0F);
+                    } else if (VillageProject.isHoleNeedingFill(state)) {
+                        sl.setBlock(this.targetPos, net.minecraft.world.level.block.Blocks.DIRT.defaultBlockState(), 3);
+                        this.kobold.playSound(SoundEvents.GRASS_PLACE, 1.0F, 1.0F);
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.targetPos.getX() + 0.5D, this.targetPos.getY() + 1.1D, this.targetPos.getZ() + 0.5D, 3, 0.2D, 0.2D, 0.2D, 0.05D);
+                    }
+                } else {
+                    StructureBlueprint.BlueprintEntry entry = project.getCurrentEntry();
+                    if (entry != null) {
+                        BlockPos worldPos = project.getWorldPosForEntry(entry);
+                        sl.setBlock(worldPos, entry.state(), 3);
+
+                        if (entry.isBed() || entry.isChest()) {
+                            this.kobold.playSound(SoundEvents.WOOD_PLACE, 1.0F, 1.0F);
+                        } else if (entry.state().is(BlockTags.WOOL)) {
+                            this.kobold.playSound(SoundEvents.WOOL_PLACE, 1.0F, 1.0F);
+                        } else if (entry.state().is(net.minecraft.world.level.block.Blocks.LANTERN) || entry.state().is(net.minecraft.world.level.block.Blocks.TORCH)) {
+                            this.kobold.playSound(SoundEvents.LANTERN_PLACE, 1.0F, 1.0F);
+                        } else if (entry.state().is(BlockTags.LOGS) || entry.state().is(BlockTags.PLANKS)) {
+                            this.kobold.playSound(SoundEvents.WOOD_PLACE, 1.0F, 1.0F);
+                        } else {
+                            this.kobold.playSound(SoundEvents.STONE_PLACE, 1.0F, 1.0F);
+                        }
+
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, worldPos.getX() + 0.5D, worldPos.getY() + 1.1D, worldPos.getZ() + 0.5D, 4, 0.2D, 0.2D, 0.2D, 0.05D);
+                        project.advanceBuild();
+                    }
+                }
+
+                if (project.isCompleted()) {
+                    KoboldGirlEntity queen = this.kobold.isAnyQueen() ? this.kobold : this.kobold.getTribeQueen();
+                    if (queen != null) {
+                        queen.onStructureCompleted(project);
+                    }
+                    this.targetPos = null;
+                } else {
+                    this.findTarget(project);
+                    if (this.targetPos != null) {
+                        this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
                     }
                 }
             }
@@ -10382,6 +10981,27 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         } else {
             output.putBoolean("HasGuardPos", false);
         }
+        output.putInt("Prosperity", this.getProsperity());
+        output.putInt("BuiltStructuresCount", this.builtStructuresCount);
+        if (this.campCenterPos != null) {
+            output.putBoolean("HasCampCenter", true);
+            output.putInt("CampCenterX", this.campCenterPos.getX());
+            output.putInt("CampCenterY", this.campCenterPos.getY());
+            output.putInt("CampCenterZ", this.campCenterPos.getZ());
+        } else {
+            output.putBoolean("HasCampCenter", false);
+        }
+        if (this.activeVillageProject != null) {
+            output.putBoolean("HasActiveProject", true);
+            output.putString("ProjectType", this.activeVillageProject.getStructureType().name());
+            output.putInt("ProjectOriginX", this.activeVillageProject.getOrigin().getX());
+            output.putInt("ProjectOriginY", this.activeVillageProject.getOrigin().getY());
+            output.putInt("ProjectOriginZ", this.activeVillageProject.getOrigin().getZ());
+            output.putBoolean("ProjectTerraformed", this.activeVillageProject.isTerraformed());
+            output.putInt("ProjectBuildIndex", this.activeVillageProject.getBuildIndex());
+        } else {
+            output.putBoolean("HasActiveProject", false);
+        }
     }
 
     @Override
@@ -10448,6 +11068,33 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             this.setGuardPosition(new BlockPos(gx, gy, gz));
         } else {
             this.setGuardPosition(null);
+        }
+        this.setProsperity(input.getIntOr("Prosperity", 0));
+        this.builtStructuresCount = input.getIntOr("BuiltStructuresCount", 0);
+        if (input.getBooleanOr("HasCampCenter", false)) {
+            int cx = input.getIntOr("CampCenterX", 0);
+            int cy = input.getIntOr("CampCenterY", 0);
+            int cz = input.getIntOr("CampCenterZ", 0);
+            this.campCenterPos = new BlockPos(cx, cy, cz);
+        } else {
+            this.campCenterPos = null;
+        }
+        if (input.getBooleanOr("HasActiveProject", false)) {
+            String typeName = input.getStringOr("ProjectType", "");
+            if (!typeName.isEmpty()) {
+                try {
+                    StructureBlueprint.StructureType type = StructureBlueprint.StructureType.valueOf(typeName);
+                    BlockPos origin = new BlockPos(input.getIntOr("ProjectOriginX", 0), input.getIntOr("ProjectOriginY", 0), input.getIntOr("ProjectOriginZ", 0));
+                    this.activeVillageProject = new VillageProject(type, origin);
+                    this.activeVillageProject.setTerraformed(input.getBooleanOr("ProjectTerraformed", false));
+                    int bIndex = input.getIntOr("ProjectBuildIndex", 0);
+                    for (int i = 0; i < bIndex && !this.activeVillageProject.isCompleted(); i++) {
+                        this.activeVillageProject.advanceBuild();
+                    }
+                } catch (IllegalArgumentException ignored) {}
+            }
+        } else {
+            this.activeVillageProject = null;
         }
     }
 
