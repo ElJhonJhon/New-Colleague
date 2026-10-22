@@ -2,6 +2,8 @@ package com.newcolleague.mod.village;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.CampfireBlock;
@@ -57,6 +59,19 @@ public class StructureBlueprint {
 
     public record BlueprintEntry(int relX, int relY, int relZ, BlockState state, boolean isBed, boolean isChest) {}
 
+    public record VillagePlot(int minX, int minZ, int maxX, int maxZ) {
+        public boolean intersects(int otherMinX, int otherMinZ, int otherMaxX, int otherMaxZ, int buffer) {
+            return !(otherMaxX + buffer < this.minX - buffer
+                    || otherMinX - buffer > this.maxX + buffer
+                    || otherMaxZ + buffer < this.minZ - buffer
+                    || otherMinZ - buffer > this.maxZ + buffer);
+        }
+
+        public boolean contains(int x, int z) {
+            return x >= this.minX && x <= this.maxX && z >= this.minZ && z <= this.maxZ;
+        }
+    }
+
     public static List<BlueprintEntry> createBlueprint(StructureType type) {
         List<BlueprintEntry> entries = new ArrayList<>();
         switch (type) {
@@ -67,6 +82,32 @@ public class StructureBlueprint {
             case WATCHTOWER -> buildWatchtower(entries);
         }
         return entries;
+    }
+
+    public static Item getRequiredItemForBlock(BlockState state) {
+        if (state == null || state.isAir()) return Items.AIR;
+        if (state.is(Blocks.FARMLAND) || state.is(Blocks.DIRT_PATH)) {
+            return Items.DIRT;
+        }
+        if (state.is(Blocks.WATER)) {
+            return Items.WATER_BUCKET;
+        }
+        if (state.is(Blocks.WHEAT)) {
+            return Items.WHEAT_SEEDS;
+        }
+        if (state.is(Blocks.CARROTS)) {
+            return Items.CARROT;
+        }
+        if (state.is(Blocks.POTATOES)) {
+            return Items.POTATO;
+        }
+        if (state.getBlock() instanceof BedBlock && state.hasProperty(BedBlock.PART)) {
+            if (state.getValue(BedBlock.PART) == BedPart.HEAD) {
+                return Items.AIR; // La cama se consume completamente al colocar la parte FOOT
+            }
+        }
+        Item item = state.getBlock().asItem();
+        return item != null ? item : Items.AIR;
     }
 
     private static void buildCampfireBase(List<BlueprintEntry> entries) {

@@ -225,6 +225,24 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     private @Nullable VillageProject activeVillageProject = null;
     private int builtStructuresCount = 0;
     private @Nullable BlockPos campCenterPos = null;
+    private final List<StructureBlueprint.VillagePlot> occupiedVillagePlots = new ArrayList<>();
+    private @Nullable Item villageProjectMissingItem = null;
+
+    public List<StructureBlueprint.VillagePlot> getOccupiedVillagePlots() {
+        return this.occupiedVillagePlots;
+    }
+
+    public void addOccupiedVillagePlot(StructureBlueprint.VillagePlot plot) {
+        this.occupiedVillagePlots.add(plot);
+    }
+
+    public @Nullable Item getVillageProjectMissingItem() {
+        return this.villageProjectMissingItem;
+    }
+
+    public void setVillageProjectMissingItem(@Nullable Item item) {
+        this.villageProjectMissingItem = item;
+    }
 
     // Posturas de mando disponibles para el gobernante
     public enum CommandStance {
@@ -1025,43 +1043,133 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         this.campCenterPos = pos;
     }
 
-    public BlockPos calculateStructureOrigin(StructureBlueprint.StructureType type, int structureIndex) {
+    public @Nullable BlockPos findNonOverlappingSite(StructureBlueprint.StructureType type) {
         BlockPos center = this.getCampCenterPos();
-        int ox = 0, oz = 0;
+        int width = type.getWidth();
+        int length = type.getLength();
 
-        switch (structureIndex) {
-            case 0 -> { ox = 0; oz = 0; }
-            case 1 -> { ox = 8; oz = 0; }
-            case 2 -> { ox = -8; oz = 0; }
-            case 3 -> { ox = 0; oz = 8; }
-            case 4 -> { ox = 0; oz = -8; }
-            case 5 -> { ox = 8; oz = 8; }
-            case 6 -> { ox = 12; oz = 12; }
-            case 7 -> { ox = -12; oz = -12; }
-            case 8 -> { ox = -8; oz = 8; }
-            default -> {
-                int ring = (structureIndex - 8);
-                ox = (ring % 2 == 0 ? 14 : -14);
-                oz = (ring > 2 ? 14 : -14);
+        // 1. Si es el Campamento Central (fogata base), se ubica centrado en la posición de la aldea
+        if (type == StructureBlueprint.StructureType.CAMPFIRE_BASE) {
+            int ox = -width / 2;
+            int oz = -length / 2;
+            int candMinX = center.getX() + ox;
+            int candMinZ = center.getZ() + oz;
+            int candMaxX = candMinX + width - 1;
+            int candMaxZ = candMinZ + length - 1;
+            int surfaceY = this.level().getHeight(Heightmap.Types.WORLD_SURFACE, center.getX(), center.getZ());
+            BlockPos surfacePos = new BlockPos(center.getX(), surfaceY, center.getZ());
+            while (surfacePos.getY() > this.level().getMinY() && (this.level().getBlockState(surfacePos).isAir() || this.level().getBlockState(surfacePos).is(BlockTags.LEAVES))) {
+                surfacePos = surfacePos.below();
+            }
+            int targetY = Math.max(this.level().getMinY() + 1, surfacePos.getY());
+            StructureBlueprint.VillagePlot plot = new StructureBlueprint.VillagePlot(candMinX, candMinZ, candMaxX, candMaxZ);
+            this.occupiedVillagePlots.add(plot);
+            return new BlockPos(candMinX, targetY, candMinZ);
+        }
+
+        // Si la lista de parcelas está vacía pero ya existe el campamento base, registrar el área central
+        if (this.occupiedVillagePlots.isEmpty()) {
+            this.occupiedVillagePlots.add(new StructureBlueprint.VillagePlot(center.getX() - 3, center.getZ() - 3, center.getX() + 3, center.getZ() + 3));
+        }
+
+        // 2. Búsqueda en anillos concéntricos alrededor del centro comunal (distancias de 8 a 42 bloques)
+        for (int dist = 8; dist <= 42; dist += 3) {
+            for (int angleDeg = 0; angleDeg < 360; angleDeg += 30) {
+                double rad = Math.toRadians(angleDeg);
+                int ox = (int) Math.round(dist * Math.cos(rad));
+                int oz = (int) Math.round(dist * Math.sin(rad));
+
+                int candMinX = center.getX() + ox;
+                int candMinZ = center.getZ() + oz;
+                int candMaxX = candMinX + width - 1;
+                int candMaxZ = candMinZ + length - 1;
+
+                // Verificación A: No colisionar con ninguna parcela ya construida o reservada (con margen de 2 bloques)
+                boolean collidesWithPlot = false;
+                for (StructureBlueprint.VillagePlot plot : this.occupiedVillagePlots) {
+                    if (plot.intersects(candMinX, candMinZ, candMaxX, candMaxZ, 2)) {
+                        collidesWithPlot = true;
+                        break;
+                    }
+                }
+                if (collidesWithPlot) continue;
+
+                // Verificación B: No superponerse con el campamento central
+                if (Math.abs((candMinX + width / 2) - center.getX()) <= 4 && Math.abs((candMinZ + length / 2) - center.getZ()) <= 4) {
+                    continue;
+                }
+
+                // Verificación C: Inspección en el mundo del terreno y estructuras existentes del jugador
+                int minY = Integer.MAX_VALUE;
+                int maxY = Integer.MIN_VALUE;
+                boolean invalidTerrain = false;
+
+                for (int x = candMinX; x <= candMaxX && !invalidTerrain; x++) {
+                    for (int z = candMinZ; z <= candMaxZ; z++) {
+                        int surfaceY = this.level().getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+                        BlockPos testPos = new BlockPos(x, surfaceY, z);
+                        while (testPos.getY() > this.level().getMinY() && (this.level().getBlockState(testPos).isAir() || this.level().getBlockState(testPos).is(BlockTags.LEAVES))) {
+                            testPos = testPos.below();
+                        }
+                        int y = testPos.getY();
+                        BlockState stateAt = this.level().getBlockState(testPos);
+                        BlockState stateAbove = this.level().getBlockState(testPos.above());
+
+                        // No construir en agua o lava
+                        if (stateAt.getFluidState().is(FluidTags.WATER) || stateAt.getFluidState().is(FluidTags.LAVA)
+                                || stateAbove.getFluidState().is(FluidTags.WATER) || stateAbove.getFluidState().is(FluidTags.LAVA)) {
+                            invalidTerrain = true;
+                            break;
+                        }
+
+                        // Proteger estructuras y pertenencias de jugadores (cofres, camas, hornos, entidades con bloque)
+                        if (stateAt.hasBlockEntity() || stateAbove.hasBlockEntity()
+                                || stateAt.is(Blocks.CHEST) || stateAt.is(Blocks.BARREL)
+                                || stateAt.getBlock() instanceof BedBlock) {
+                            invalidTerrain = true;
+                            break;
+                        }
+
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+                }
+
+                if (invalidTerrain) continue;
+
+                // Verificación D: Desnivel del terreno <= 3 bloques
+                if (maxY - minY > 3) continue;
+
+                // ¡Sitio perfecto encontrado!
+                int chosenY = (minY + maxY) / 2;
+                StructureBlueprint.VillagePlot chosenPlot = new StructureBlueprint.VillagePlot(candMinX, candMinZ, candMaxX, candMaxZ);
+                this.occupiedVillagePlots.add(chosenPlot);
+                return new BlockPos(candMinX, chosenY, candMinZ);
             }
         }
 
-        int testX = center.getX() + ox;
-        int testZ = center.getZ() + oz;
-        int surfaceY = this.level().getHeight(Heightmap.Types.WORLD_SURFACE, testX, testZ);
-        BlockPos surfacePos = new BlockPos(testX, surfaceY, testZ);
-        while (surfacePos.getY() > this.level().getMinY() && (this.level().getBlockState(surfacePos).isAir() || this.level().getBlockState(surfacePos).is(BlockTags.LEAVES))) {
-            surfacePos = surfacePos.below();
-        }
-        int targetY = Math.max(this.level().getMinY() + 1, surfacePos.getY());
-        return new BlockPos(testX, targetY, testZ);
+        return null;
     }
 
     public boolean startNewVillageProject(StructureBlueprint.StructureType type) {
         if (this.activeVillageProject != null && !this.activeVillageProject.isCompleted()) {
             return false;
         }
-        BlockPos origin = this.calculateStructureOrigin(type, this.builtStructuresCount);
+        BlockPos origin = this.findNonOverlappingSite(type);
+        if (origin == null) {
+            Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+            Component msg = Component.literal("No encontramos terreno adecuado y libre para: ")
+                    .withStyle(ChatFormatting.RED)
+                    .append(Component.literal(type.getDisplayName()).withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD))
+                    .append(Component.literal(". ¡Se necesita un área plana libre de obstáculos y agua!").withStyle(ChatFormatting.RED));
+            Player owner = this.getOwner();
+            if (owner instanceof ServerPlayer sp) {
+                sp.sendSystemMessage(speaker.copy().append(msg));
+            }
+            return false;
+        }
+
+        this.villageProjectMissingItem = null;
         this.activeVillageProject = new VillageProject(type, origin);
 
         if (this.level() instanceof ServerLevel sl) {
@@ -1073,7 +1181,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         Component msg = Component.literal("¡Iniciando la construcción de: ")
                 .withStyle(ChatFormatting.YELLOW)
                 .append(Component.literal(type.getDisplayName()).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD))
-                .append(Component.literal("! Nuestras constructoras aplanarán el terreno y comenzarán las obras.").withStyle(ChatFormatting.YELLOW));
+                .append(Component.literal("! Nuestras constructoras aplanarán el terreno y buscarán los materiales necesarios.").withStyle(ChatFormatting.YELLOW));
 
         Player owner = this.getOwner();
         if (owner instanceof ServerPlayer sp) {
@@ -1085,6 +1193,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     public void onStructureCompleted(VillageProject project) {
         if (!(this.level() instanceof ServerLevel sl)) return;
 
+        this.villageProjectMissingItem = null;
         this.builtStructuresCount++;
         this.addProsperity(35);
 
@@ -6055,6 +6164,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                             ? "§eAplanando y nivelando terreno para cimientos..."
                             : "§aEdificando estructura (" + (this.activeVillageProject.getBuildIndex() * 100 / Math.max(1, this.activeVillageProject.getTotalBlocks())) + "%)";
                     player.sendSystemMessage(Component.literal("§d🏗 Proyecto activo: §f" + this.activeVillageProject.getStructureType().getDisplayName() + " §7- " + stateStr));
+                    if (this.villageProjectMissingItem != null) {
+                        player.sendSystemMessage(Component.literal("§c⚠ Obras pausadas: §eFalta 1x " + new ItemStack(this.villageProjectMissingItem).getHoverName().getString() + " §7en los cofres comunales."));
+                        player.sendSystemMessage(Component.literal("§7💡 Coloca el ítem en cualquier cofre o barril de la aldea y las constructoras irán a buscarlo."));
+                    }
                 } else {
                     player.sendSystemMessage(Component.literal("§aNo hay obras activas en este instante. Nuestras súbditas constructoras están listas."));
                     StructureBlueprint.StructureType nextType = null;
@@ -6214,6 +6327,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (this.activeVillageProject != null) {
             String stateStr = !this.activeVillageProject.isTerraformed() ? "§eAplanando y nivelando terreno..." : "§aConstruyendo (" + (this.activeVillageProject.getBuildIndex() * 100 / Math.max(1, this.activeVillageProject.getTotalBlocks())) + "%)";
             player.sendSystemMessage(Component.literal("§d🏗 Proyecto en curso: §f" + this.activeVillageProject.getStructureType().getDisplayName() + " - " + stateStr));
+            if (this.villageProjectMissingItem != null) {
+                player.sendSystemMessage(Component.literal("§c  ⚠ Pausado: §eFalta 1x " + new ItemStack(this.villageProjectMissingItem).getHoverName().getString() + " §7en los cofres de la aldea."));
+            }
         } else {
             player.sendSystemMessage(Component.literal("§7🏗 Proyecto en curso: §fNinguno (Aldea en paz)"));
         }
@@ -8041,14 +8157,29 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
     }
 
-    // Meta: Aplanar y nivelar terreno, y construir estructuras de la aldea tribal
+    // Meta: Aplanar y nivelar terreno, buscar recursos en cofres o naturaleza, y construir estructuras
     public static class KoboldVillageBuildGoal extends net.minecraft.world.entity.ai.goal.Goal {
         private final KoboldGirlEntity kobold;
         private final double speedModifier;
+
+        public enum BuildPhase {
+            TERRAFORMING_CLEAR,
+            TERRAFORMING_FILL,
+            FETCHING_FROM_CHEST,
+            GATHERING_FROM_NATURE,
+            BUILDING,
+            WAITING_FOR_MATERIALS
+        }
+
+        private BuildPhase currentPhase = BuildPhase.BUILDING;
         private @Nullable BlockPos targetPos;
-        private boolean isTerraformingStep;
+        private @Nullable BlockPos chestTarget;
+        private @Nullable BlockPos gatherTarget;
+        private @Nullable Item itemToFetch;
+        private @Nullable Item missingMaterialItem;
         private int workTicks = 0;
         private int searchCooldown = 0;
+        private int waitingTicks = 0;
 
         public KoboldVillageBuildGoal(KoboldGirlEntity kobold, double speedModifier) {
             this.kobold = kobold;
@@ -8092,23 +8223,134 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         private boolean findTarget(VillageProject project) {
             Level level = this.kobold.level();
+
+            // 1. Fase de Nivelado / Terraforming
             if (!project.isTerraformed()) {
                 BlockPos terraformPos = project.findNextTerraformTarget(level);
                 if (terraformPos != null) {
-                    this.targetPos = terraformPos;
-                    this.isTerraformingStep = true;
-                    return true;
+                    BlockState state = level.getBlockState(terraformPos);
+                    if (VillageProject.isClearableNaturalBlock(state)) {
+                        this.targetPos = terraformPos;
+                        this.currentPhase = BuildPhase.TERRAFORMING_CLEAR;
+                        return true;
+                    } else if (VillageProject.isHoleNeedingFill(state)) {
+                        if (this.hasItem(Items.DIRT)) {
+                            this.targetPos = terraformPos;
+                            this.currentPhase = BuildPhase.TERRAFORMING_FILL;
+                            return true;
+                        }
+
+                        BlockPos chest = this.findNearbyChestWithItem(level, Items.DIRT);
+                        if (chest != null) {
+                            this.chestTarget = chest;
+                            this.itemToFetch = Items.DIRT;
+                            this.targetPos = chest;
+                            this.currentPhase = BuildPhase.FETCHING_FROM_CHEST;
+                            return true;
+                        }
+
+                        BlockPos dirtSource = this.findNearbyNaturalDirt(level, this.kobold.blockPosition(), 16);
+                        if (dirtSource != null) {
+                            this.gatherTarget = dirtSource;
+                            this.targetPos = dirtSource;
+                            this.currentPhase = BuildPhase.GATHERING_FROM_NATURE;
+                            return true;
+                        }
+
+                        this.missingMaterialItem = Items.DIRT;
+                        this.currentPhase = BuildPhase.WAITING_FOR_MATERIALS;
+                        this.targetPos = project.getOrigin().offset(2, 1, 2);
+                        return true;
+                    }
                 } else {
                     project.setTerraformed(true);
                 }
             }
 
+            // 2. Fase de Construcción de Bloques del Blueprint
             StructureBlueprint.BlueprintEntry entry = project.getCurrentEntry();
             if (entry != null) {
-                this.targetPos = project.getWorldPosForEntry(entry);
-                this.isTerraformingStep = false;
+                BlockPos worldPos = project.getWorldPosForEntry(entry);
+                Item required = StructureBlueprint.getRequiredItemForBlock(entry.state());
+
+                if (required == Items.AIR) {
+                    this.targetPos = worldPos;
+                    this.currentPhase = BuildPhase.BUILDING;
+                    return true;
+                }
+
+                // 2.A: ¿Tiene el ítem en su inventario o puede craftearlo?
+                if (this.hasOrCanCraft(required)) {
+                    this.targetPos = worldPos;
+                    this.currentPhase = BuildPhase.BUILDING;
+                    this.missingMaterialItem = null;
+                    KoboldGirlEntity queen = this.kobold.isAnyQueen() ? this.kobold : this.kobold.getTribeQueen();
+                    if (queen != null) queen.setVillageProjectMissingItem(null);
+                    return true;
+                }
+
+                // 2.B: Buscar en cofres comunales cercanos
+                BlockPos chest = this.findNearbyChestWithItem(level, required);
+                if (chest != null) {
+                    this.chestTarget = chest;
+                    this.itemToFetch = required;
+                    this.targetPos = chest;
+                    this.currentPhase = BuildPhase.FETCHING_FROM_CHEST;
+                    return true;
+                }
+
+                // 2.C: Recolectar directamente de la naturaleza si es madera, piedra o tierra
+                if (isWoodProduct(required)) {
+                    BlockPos treePos = this.findNearbyTreeLog(level, this.kobold.blockPosition(), 20);
+                    if (treePos != null) {
+                        this.gatherTarget = treePos;
+                        this.targetPos = treePos;
+                        this.currentPhase = BuildPhase.GATHERING_FROM_NATURE;
+                        return true;
+                    }
+                }
+
+                if (required == Items.COBBLESTONE) {
+                    BlockPos stonePos = this.findNearbyStone(level, this.kobold.blockPosition(), 20);
+                    if (stonePos != null) {
+                        this.gatherTarget = stonePos;
+                        this.targetPos = stonePos;
+                        this.currentPhase = BuildPhase.GATHERING_FROM_NATURE;
+                        return true;
+                    }
+                }
+
+                if (required == Items.DIRT) {
+                    BlockPos dirtPos = this.findNearbyNaturalDirt(level, this.kobold.blockPosition(), 16);
+                    if (dirtPos != null) {
+                        this.gatherTarget = dirtPos;
+                        this.targetPos = dirtPos;
+                        this.currentPhase = BuildPhase.GATHERING_FROM_NATURE;
+                        return true;
+                    }
+                }
+
+                if (required == Items.WHEAT_SEEDS) {
+                    BlockPos grassPos = this.findNearbyTallGrass(level, this.kobold.blockPosition(), 16);
+                    if (grassPos != null) {
+                        this.gatherTarget = grassPos;
+                        this.targetPos = grassPos;
+                        this.currentPhase = BuildPhase.GATHERING_FROM_NATURE;
+                        return true;
+                    }
+                }
+
+                // 2.D: El ítem no está disponible ni se puede recolectar a mano (Cama, Lana, Linterna, etc.)
+                this.missingMaterialItem = required;
+                this.currentPhase = BuildPhase.WAITING_FOR_MATERIALS;
+                this.targetPos = project.getOrigin().offset(2, 1, 2);
+                KoboldGirlEntity queen = this.kobold.isAnyQueen() ? this.kobold : this.kobold.getTribeQueen();
+                if (queen != null) {
+                    queen.setVillageProjectMissingItem(required);
+                }
                 return true;
             }
+
             return false;
         }
 
@@ -8131,7 +8373,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         @Override
         public void stop() {
             this.targetPos = null;
+            this.chestTarget = null;
+            this.gatherTarget = null;
             this.workTicks = 0;
+            this.waitingTicks = 0;
             this.kobold.getNavigation().stop();
         }
 
@@ -8140,10 +8385,39 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             VillageProject project = this.getProject();
             if (project == null || project.isCompleted() || this.targetPos == null) return;
 
+            Level level = this.kobold.level();
+            if (!(level instanceof ServerLevel sl)) return;
+
+            // 1. Manejo de fase WAITING_FOR_MATERIALS
+            if (this.currentPhase == BuildPhase.WAITING_FOR_MATERIALS) {
+                this.waitingTicks++;
+                this.kobold.getLookControl().setLookAt(project.getOrigin().getX() + 2.5D, project.getOrigin().getY() + 1.0D, project.getOrigin().getZ() + 2.5D, 30.0F, 30.0F);
+
+                if (this.waitingTicks % 40 == 0) {
+                    sl.sendParticles(ParticleTypes.SMOKE, this.kobold.getX(), this.kobold.getY() + 1.8D, this.kobold.getZ(), 3, 0.15D, 0.15D, 0.15D, 0.02D);
+                }
+
+                if (this.waitingTicks % 60 == 0) {
+                    if (this.missingMaterialItem != null) {
+                        BlockPos foundChest = this.findNearbyChestWithItem(level, this.missingMaterialItem);
+                        if (foundChest != null || this.hasOrCanCraft(this.missingMaterialItem)) {
+                            this.waitingTicks = 0;
+                            this.findTarget(project);
+                            if (this.targetPos != null) {
+                                this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+
+            // 2. Acercamiento al objetivo
             double distSq = this.kobold.distanceToSqr(Vec3.atCenterOf(this.targetPos));
             this.kobold.getLookControl().setLookAt(this.targetPos.getX() + 0.5D, this.targetPos.getY() + 0.5D, this.targetPos.getZ() + 0.5D, 30.0F, 30.0F);
 
-            if (distSq > 16.0D) {
+            double reachDist = (this.currentPhase == BuildPhase.FETCHING_FROM_CHEST) ? 6.25D : 12.25D;
+            if (distSq > reachDist) {
                 if (this.kobold.getNavigation().isDone() || this.kobold.tickCount % 20 == 0) {
                     this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
                 }
@@ -8157,58 +8431,381 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 this.kobold.swing(InteractionHand.MAIN_HAND);
             }
 
-            if (this.workTicks >= 20) {
-                this.workTicks = 0;
-                Level level = this.kobold.level();
-                if (!(level instanceof ServerLevel sl)) return;
-
-                if (this.isTerraformingStep) {
-                    BlockState state = level.getBlockState(this.targetPos);
-                    if (VillageProject.isClearableNaturalBlock(state)) {
-                        sl.levelEvent(2001, this.targetPos, net.minecraft.world.level.block.Block.getId(state));
-                        sl.destroyBlock(this.targetPos, false);
-                        this.kobold.playSound(SoundEvents.GRASS_BREAK, 1.0F, 1.0F);
-                    } else if (VillageProject.isHoleNeedingFill(state)) {
-                        sl.setBlock(this.targetPos, net.minecraft.world.level.block.Blocks.DIRT.defaultBlockState(), 3);
-                        this.kobold.playSound(SoundEvents.GRASS_PLACE, 1.0F, 1.0F);
-                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.targetPos.getX() + 0.5D, this.targetPos.getY() + 1.1D, this.targetPos.getZ() + 0.5D, 3, 0.2D, 0.2D, 0.2D, 0.05D);
-                    }
-                } else {
-                    StructureBlueprint.BlueprintEntry entry = project.getCurrentEntry();
-                    if (entry != null) {
-                        BlockPos worldPos = project.getWorldPosForEntry(entry);
-                        sl.setBlock(worldPos, entry.state(), 3);
-
-                        if (entry.isBed() || entry.isChest()) {
-                            this.kobold.playSound(SoundEvents.WOOD_PLACE, 1.0F, 1.0F);
-                        } else if (entry.state().is(BlockTags.WOOL)) {
-                            this.kobold.playSound(SoundEvents.WOOL_PLACE, 1.0F, 1.0F);
-                        } else if (entry.state().is(net.minecraft.world.level.block.Blocks.LANTERN) || entry.state().is(net.minecraft.world.level.block.Blocks.TORCH)) {
-                            this.kobold.playSound(SoundEvents.LANTERN_PLACE, 1.0F, 1.0F);
-                        } else if (entry.state().is(BlockTags.LOGS) || entry.state().is(BlockTags.PLANKS)) {
-                            this.kobold.playSound(SoundEvents.WOOD_PLACE, 1.0F, 1.0F);
-                        } else {
-                            this.kobold.playSound(SoundEvents.STONE_PLACE, 1.0F, 1.0F);
+            switch (this.currentPhase) {
+                case FETCHING_FROM_CHEST -> {
+                    if (this.workTicks >= 15) {
+                        this.workTicks = 0;
+                        if (this.chestTarget != null && this.itemToFetch != null) {
+                            sl.playSound(null, this.chestTarget, SoundEvents.CHEST_OPEN, SoundSource.BLOCKS, 0.8F, 1.0F);
+                            boolean retrieved = this.extractMaterialFromChest(this.chestTarget, this.itemToFetch);
+                            sl.playSound(null, this.chestTarget, SoundEvents.CHEST_CLOSE, SoundSource.BLOCKS, 0.8F, 1.0F);
+                            if (retrieved) {
+                                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.kobold.getX(), this.kobold.getY() + 1.5D, this.kobold.getZ(), 5, 0.3D, 0.3D, 0.3D, 0.05D);
+                            }
                         }
-
-                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, worldPos.getX() + 0.5D, worldPos.getY() + 1.1D, worldPos.getZ() + 0.5D, 4, 0.2D, 0.2D, 0.2D, 0.05D);
-                        project.advanceBuild();
+                        this.findTarget(project);
+                        if (this.targetPos != null) {
+                            this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
+                        }
                     }
                 }
-
-                if (project.isCompleted()) {
-                    KoboldGirlEntity queen = this.kobold.isAnyQueen() ? this.kobold : this.kobold.getTribeQueen();
-                    if (queen != null) {
-                        queen.onStructureCompleted(project);
+                case GATHERING_FROM_NATURE -> {
+                    if (this.workTicks >= 20) {
+                        this.workTicks = 0;
+                        if (this.gatherTarget != null) {
+                            BlockState state = level.getBlockState(this.gatherTarget);
+                            sl.levelEvent(2001, this.gatherTarget, Block.getId(state));
+                            sl.destroyBlock(this.gatherTarget, false);
+                            if (state.is(BlockTags.LOGS)) {
+                                this.kobold.getInventory().addItem(new ItemStack(Items.OAK_LOG));
+                                this.kobold.playSound(SoundEvents.WOOD_BREAK, 1.0F, 1.0F);
+                            } else if (state.is(Blocks.STONE) || state.is(Blocks.ANDESITE) || state.is(Blocks.DIORITE) || state.is(Blocks.GRANITE) || state.is(Blocks.COBBLESTONE)) {
+                                this.kobold.getInventory().addItem(new ItemStack(Items.COBBLESTONE));
+                                this.kobold.playSound(SoundEvents.STONE_BREAK, 1.0F, 1.0F);
+                            } else if (state.is(Blocks.DIRT) || state.is(Blocks.GRASS_BLOCK)) {
+                                this.kobold.getInventory().addItem(new ItemStack(Items.DIRT));
+                                this.kobold.playSound(SoundEvents.GRASS_BREAK, 1.0F, 1.0F);
+                            } else if (state.is(Blocks.SHORT_GRASS) || state.is(Blocks.TALL_GRASS)) {
+                                this.kobold.getInventory().addItem(new ItemStack(Items.WHEAT_SEEDS));
+                                this.kobold.playSound(SoundEvents.GRASS_BREAK, 1.0F, 1.0F);
+                            }
+                            sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.kobold.getX(), this.kobold.getY() + 1.2D, this.kobold.getZ(), 4, 0.2D, 0.2D, 0.2D, 0.05D);
+                        }
+                        this.findTarget(project);
+                        if (this.targetPos != null) {
+                            this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
+                        }
                     }
-                    this.targetPos = null;
-                } else {
-                    this.findTarget(project);
-                    if (this.targetPos != null) {
-                        this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
+                }
+                case TERRAFORMING_CLEAR -> {
+                    if (this.workTicks >= 16) {
+                        this.workTicks = 0;
+                        BlockState state = level.getBlockState(this.targetPos);
+                        if (VillageProject.isClearableNaturalBlock(state)) {
+                            sl.levelEvent(2001, this.targetPos, Block.getId(state));
+                            sl.destroyBlock(this.targetPos, false);
+                            if (state.is(Blocks.DIRT) || state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.COARSE_DIRT) || state.is(Blocks.PODZOL)) {
+                                this.kobold.getInventory().addItem(new ItemStack(Items.DIRT));
+                                this.kobold.playSound(SoundEvents.GRASS_BREAK, 1.0F, 1.0F);
+                            } else if (state.is(Blocks.STONE) || state.is(Blocks.ANDESITE) || state.is(Blocks.DIORITE) || state.is(Blocks.GRANITE)) {
+                                this.kobold.getInventory().addItem(new ItemStack(Items.COBBLESTONE));
+                                this.kobold.playSound(SoundEvents.STONE_BREAK, 1.0F, 1.0F);
+                            } else if (state.is(BlockTags.LOGS)) {
+                                this.kobold.getInventory().addItem(new ItemStack(Items.OAK_LOG));
+                                this.kobold.playSound(SoundEvents.WOOD_BREAK, 1.0F, 1.0F);
+                            } else {
+                                this.kobold.playSound(SoundEvents.GRASS_BREAK, 1.0F, 1.0F);
+                            }
+                        }
+                        this.findTarget(project);
+                        if (this.targetPos != null) {
+                            this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
+                        }
+                    }
+                }
+                case TERRAFORMING_FILL -> {
+                    if (this.workTicks >= 16) {
+                        this.workTicks = 0;
+                        BlockState state = level.getBlockState(this.targetPos);
+                        if (VillageProject.isHoleNeedingFill(state)) {
+                            if (this.consumeItem(Items.DIRT, 1)) {
+                                sl.setBlock(this.targetPos, Blocks.DIRT.defaultBlockState(), 3);
+                                this.kobold.playSound(SoundEvents.GRASS_PLACE, 1.0F, 1.0F);
+                                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.targetPos.getX() + 0.5D, this.targetPos.getY() + 1.1D, this.targetPos.getZ() + 0.5D, 3, 0.2D, 0.2D, 0.2D, 0.05D);
+                            }
+                        }
+                        this.findTarget(project);
+                        if (this.targetPos != null) {
+                            this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
+                        }
+                    }
+                }
+                case BUILDING -> {
+                    if (this.workTicks >= 18) {
+                        this.workTicks = 0;
+                        StructureBlueprint.BlueprintEntry entry = project.getCurrentEntry();
+                        if (entry != null) {
+                            Item required = StructureBlueprint.getRequiredItemForBlock(entry.state());
+                            boolean canPlace = (required == Items.AIR) || this.consumeOrCraftItem(required);
+                            if (canPlace) {
+                                BlockPos worldPos = project.getWorldPosForEntry(entry);
+                                sl.setBlock(worldPos, entry.state(), 3);
+
+                                if (entry.isBed() || entry.isChest()) {
+                                    this.kobold.playSound(SoundEvents.WOOD_PLACE, 1.0F, 1.0F);
+                                } else if (entry.state().is(BlockTags.WOOL)) {
+                                    this.kobold.playSound(SoundEvents.WOOL_PLACE, 1.0F, 1.0F);
+                                } else if (entry.state().is(Blocks.LANTERN) || entry.state().is(Blocks.TORCH)) {
+                                    this.kobold.playSound(SoundEvents.LANTERN_PLACE, 1.0F, 1.0F);
+                                } else if (entry.state().is(BlockTags.LOGS) || entry.state().is(BlockTags.PLANKS)) {
+                                    this.kobold.playSound(SoundEvents.WOOD_PLACE, 1.0F, 1.0F);
+                                } else {
+                                    this.kobold.playSound(SoundEvents.STONE_PLACE, 1.0F, 1.0F);
+                                }
+
+                                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, worldPos.getX() + 0.5D, worldPos.getY() + 1.1D, worldPos.getZ() + 0.5D, 4, 0.2D, 0.2D, 0.2D, 0.05D);
+                                project.advanceBuild();
+                            }
+                        }
+
+                        if (project.isCompleted()) {
+                            KoboldGirlEntity queen = this.kobold.isAnyQueen() ? this.kobold : this.kobold.getTribeQueen();
+                            if (queen != null) {
+                                queen.onStructureCompleted(project);
+                            }
+                            this.targetPos = null;
+                        } else {
+                            this.findTarget(project);
+                            if (this.targetPos != null) {
+                                this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        private boolean hasItem(Item item) {
+            for (int i = 0; i < this.kobold.getInventory().getContainerSize(); i++) {
+                ItemStack s = this.kobold.getInventory().getItem(i);
+                if (!s.isEmpty() && s.is(item) && s.getCount() > 0) return true;
+            }
+            return false;
+        }
+
+        private int countItem(Item item) {
+            int count = 0;
+            for (int i = 0; i < this.kobold.getInventory().getContainerSize(); i++) {
+                ItemStack s = this.kobold.getInventory().getItem(i);
+                if (!s.isEmpty() && s.is(item)) count += s.getCount();
+            }
+            return count;
+        }
+
+        private boolean consumeItem(Item item, int amount) {
+            int needed = amount;
+            for (int i = 0; i < this.kobold.getInventory().getContainerSize(); i++) {
+                ItemStack s = this.kobold.getInventory().getItem(i);
+                if (!s.isEmpty() && s.is(item)) {
+                    if (s.getCount() >= needed) {
+                        s.shrink(needed);
+                        return true;
+                    } else {
+                        needed -= s.getCount();
+                        this.kobold.getInventory().setItem(i, ItemStack.EMPTY);
+                    }
+                }
+            }
+            return needed <= 0;
+        }
+
+        private boolean hasOrCanCraft(Item item) {
+            if (this.hasItem(item)) return true;
+            if (item == Items.OAK_PLANKS) return this.hasItem(Items.OAK_LOG);
+            if (item == Items.OAK_SLAB) return this.hasItem(Items.OAK_PLANKS) || this.hasItem(Items.OAK_LOG);
+            if (item == Items.OAK_FENCE || item == Items.OAK_FENCE_GATE) return this.hasItem(Items.OAK_PLANKS) || this.hasItem(Items.OAK_LOG);
+            if (item == Items.CRAFTING_TABLE) return this.countItem(Items.OAK_PLANKS) >= 4 || this.hasItem(Items.OAK_LOG);
+            if (item == Items.CHEST || item == Items.BARREL) return this.countItem(Items.OAK_PLANKS) >= 8 || this.countItem(Items.OAK_LOG) >= 2;
+            if (item == Items.CAMPFIRE) return this.hasItem(Items.OAK_LOG);
+            if (item == Items.TORCH) return this.hasItem(Items.TORCH) || this.hasItem(Items.COAL) || this.hasItem(Items.CHARCOAL);
+            return false;
+        }
+
+        private boolean consumeOrCraftItem(Item item) {
+            if (this.hasItem(item)) {
+                return this.consumeItem(item, 1);
+            }
+            if (item == Items.OAK_PLANKS && this.consumeItem(Items.OAK_LOG, 1)) {
+                this.kobold.getInventory().addItem(new ItemStack(Items.OAK_PLANKS, 3));
+                return true;
+            }
+            if (item == Items.OAK_SLAB) {
+                if (this.consumeItem(Items.OAK_PLANKS, 1)) {
+                    this.kobold.getInventory().addItem(new ItemStack(Items.OAK_SLAB, 1));
+                    return true;
+                } else if (this.consumeItem(Items.OAK_LOG, 1)) {
+                    this.kobold.getInventory().addItem(new ItemStack(Items.OAK_SLAB, 5));
+                    return true;
+                }
+            }
+            if (item == Items.OAK_FENCE || item == Items.OAK_FENCE_GATE) {
+                if (this.consumeItem(Items.OAK_PLANKS, 2)) {
+                    return true;
+                } else if (this.consumeItem(Items.OAK_LOG, 1)) {
+                    this.kobold.getInventory().addItem(new ItemStack(Items.OAK_PLANKS, 2));
+                    return true;
+                }
+            }
+            if (item == Items.CRAFTING_TABLE) {
+                if (this.consumeItem(Items.OAK_PLANKS, 4)) return true;
+                if (this.consumeItem(Items.OAK_LOG, 1)) return true;
+            }
+            if (item == Items.CHEST || item == Items.BARREL) {
+                if (this.consumeItem(Items.OAK_PLANKS, 8)) return true;
+                if (this.consumeItem(Items.OAK_LOG, 2)) return true;
+            }
+            if (item == Items.CAMPFIRE && this.consumeItem(Items.OAK_LOG, 1)) {
+                return true;
+            }
+            if (item == Items.TORCH && (this.consumeItem(Items.COAL, 1) || this.consumeItem(Items.CHARCOAL, 1))) {
+                this.kobold.getInventory().addItem(new ItemStack(Items.TORCH, 3));
+                return true;
+            }
+            return false;
+        }
+
+        private static boolean isWoodProduct(Item item) {
+            return item == Items.OAK_PLANKS || item == Items.OAK_SLAB || item == Items.OAK_FENCE
+                    || item == Items.OAK_FENCE_GATE || item == Items.CRAFTING_TABLE || item == Items.CHEST
+                    || item == Items.BARREL || item == Items.CAMPFIRE || item == Items.OAK_LOG;
+        }
+
+        private @Nullable BlockPos findNearbyChestWithItem(Level level, Item item) {
+            List<BlockPos> chests = findNearbyUniqueChests(level, this.kobold.blockPosition(), 32, 12);
+            for (BlockPos pos : chests) {
+                Container c = getChestContainer(level, pos);
+                if (c == null || c.isEmpty()) continue;
+                for (int i = 0; i < c.getContainerSize(); i++) {
+                    ItemStack st = c.getItem(i);
+                    if (!st.isEmpty()) {
+                        if (st.is(item) || (isWoodProduct(item) && (st.is(ItemTags.LOGS) || st.is(Items.OAK_LOG)))) {
+                            return pos;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        private boolean extractMaterialFromChest(BlockPos chestPos, Item itemToFetch) {
+            Container container = getChestContainer(this.kobold.level(), chestPos);
+            if (container == null) return false;
+            int taken = 0;
+            for (int i = 0; i < container.getContainerSize(); i++) {
+                ItemStack stack = container.getItem(i);
+                if (stack.isEmpty()) continue;
+
+                boolean matches = stack.is(itemToFetch);
+                if (!matches && isWoodProduct(itemToFetch) && (stack.is(ItemTags.LOGS) || stack.is(Items.OAK_LOG))) {
+                    matches = true;
+                }
+
+                if (matches) {
+                    int toExtract = Math.min(stack.getCount(), 16 - taken);
+                    ItemStack extracted = container.removeItem(i, toExtract);
+                    ItemStack leftover = this.kobold.getInventory().addItem(extracted);
+                    if (!leftover.isEmpty()) {
+                        addItemToContainer(container, leftover);
+                    } else {
+                        taken += toExtract;
+                    }
+                    if (taken >= 16) break;
+                }
+            }
+            container.setChanged();
+            return taken > 0;
+        }
+
+        private boolean isPosInsideAnyOccupiedPlot(int x, int z) {
+            KoboldGirlEntity queen = this.kobold.isAnyQueen() ? this.kobold : this.kobold.getTribeQueen();
+            if (queen != null) {
+                for (StructureBlueprint.VillagePlot plot : queen.getOccupiedVillagePlots()) {
+                    if (plot.contains(x, z)) return true;
+                }
+            }
+            return false;
+        }
+
+        private @Nullable BlockPos findNearbyTreeLog(Level level, BlockPos center, int radius) {
+            BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+            BlockPos closest = null;
+            double closestDist = Double.MAX_VALUE;
+            for (int dy = -3; dy <= 8; dy++) {
+                for (int dx = -radius; dx <= radius; dx++) {
+                    for (int dz = -radius; dz <= radius; dz++) {
+                        mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                        BlockState state = level.getBlockState(mpos);
+                        if (state.is(BlockTags.LOGS)) {
+                            if (this.isPosInsideAnyOccupiedPlot(mpos.getX(), mpos.getZ())) continue;
+                            double dist = center.distSqr(mpos);
+                            if (dist < closestDist) {
+                                closestDist = dist;
+                                closest = mpos.immutable();
+                            }
+                        }
+                    }
+                }
+            }
+            return closest;
+        }
+
+        private @Nullable BlockPos findNearbyStone(Level level, BlockPos center, int radius) {
+            BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+            BlockPos closest = null;
+            double closestDist = Double.MAX_VALUE;
+            for (int dy = -3; dy <= 4; dy++) {
+                for (int dx = -radius; dx <= radius; dx++) {
+                    for (int dz = -radius; dz <= radius; dz++) {
+                        mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                        BlockState state = level.getBlockState(mpos);
+                        if (state.is(Blocks.STONE) || state.is(Blocks.ANDESITE) || state.is(Blocks.DIORITE) || state.is(Blocks.GRANITE) || state.is(Blocks.COBBLESTONE)) {
+                            if (this.isPosInsideAnyOccupiedPlot(mpos.getX(), mpos.getZ())) continue;
+                            double dist = center.distSqr(mpos);
+                            if (dist < closestDist) {
+                                closestDist = dist;
+                                closest = mpos.immutable();
+                            }
+                        }
+                    }
+                }
+            }
+            return closest;
+        }
+
+        private @Nullable BlockPos findNearbyNaturalDirt(Level level, BlockPos center, int radius) {
+            BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+            BlockPos closest = null;
+            double closestDist = Double.MAX_VALUE;
+            for (int dy = -3; dy <= 3; dy++) {
+                for (int dx = -radius; dx <= radius; dx++) {
+                    for (int dz = -radius; dz <= radius; dz++) {
+                        mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                        BlockState state = level.getBlockState(mpos);
+                        if (state.is(Blocks.DIRT) || state.is(Blocks.GRASS_BLOCK)) {
+                            if (this.isPosInsideAnyOccupiedPlot(mpos.getX(), mpos.getZ())) continue;
+                            double dist = center.distSqr(mpos);
+                            if (dist < closestDist) {
+                                closestDist = dist;
+                                closest = mpos.immutable();
+                            }
+                        }
+                    }
+                }
+            }
+            return closest;
+        }
+
+        private @Nullable BlockPos findNearbyTallGrass(Level level, BlockPos center, int radius) {
+            BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+            BlockPos closest = null;
+            double closestDist = Double.MAX_VALUE;
+            for (int dy = -2; dy <= 3; dy++) {
+                for (int dx = -radius; dx <= radius; dx++) {
+                    for (int dz = -radius; dz <= radius; dz++) {
+                        mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                        BlockState state = level.getBlockState(mpos);
+                        if (state.is(Blocks.SHORT_GRASS) || state.is(Blocks.TALL_GRASS)) {
+                            if (this.isPosInsideAnyOccupiedPlot(mpos.getX(), mpos.getZ())) continue;
+                            double dist = center.distSqr(mpos);
+                            if (dist < closestDist) {
+                                closestDist = dist;
+                                closest = mpos.immutable();
+                            }
+                        }
+                    }
+                }
+            }
+            return closest;
         }
     }
 
@@ -8431,7 +9028,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
                             ItemStack hoe = this.kobold.getMainHandItem();
                             if (isHoe(hoe)) {
-                                hoe.hurtAndBreak(1, serverLevel, this.kobold, item -> this.kobold.onEquippedItemBroken(item, EquipmentSlot.MAINHAND));
+                                hoe.hurtAndBreak(1, serverLevel, null, item -> this.kobold.onEquippedItemBroken(item, EquipmentSlot.MAINHAND));
                             }
 
                             // Sembrar inmediatamente si tiene semillas
@@ -11285,6 +11882,14 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
         output.putInt("Prosperity", this.getProsperity());
         output.putInt("BuiltStructuresCount", this.builtStructuresCount);
+        output.putInt("OccupiedPlotsCount", this.occupiedVillagePlots.size());
+        for (int i = 0; i < this.occupiedVillagePlots.size(); i++) {
+            StructureBlueprint.VillagePlot plot = this.occupiedVillagePlots.get(i);
+            output.putInt("Plot_" + i + "_minX", plot.minX());
+            output.putInt("Plot_" + i + "_minZ", plot.minZ());
+            output.putInt("Plot_" + i + "_maxX", plot.maxX());
+            output.putInt("Plot_" + i + "_maxZ", plot.maxZ());
+        }
         if (this.campCenterPos != null) {
             output.putBoolean("HasCampCenter", true);
             output.putInt("CampCenterX", this.campCenterPos.getX());
@@ -11373,6 +11978,15 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
         this.setProsperity(input.getIntOr("Prosperity", 0));
         this.builtStructuresCount = input.getIntOr("BuiltStructuresCount", 0);
+        int plotCount = input.getIntOr("OccupiedPlotsCount", 0);
+        this.occupiedVillagePlots.clear();
+        for (int i = 0; i < plotCount; i++) {
+            int minX = input.getIntOr("Plot_" + i + "_minX", 0);
+            int minZ = input.getIntOr("Plot_" + i + "_minZ", 0);
+            int maxX = input.getIntOr("Plot_" + i + "_maxX", 0);
+            int maxZ = input.getIntOr("Plot_" + i + "_maxZ", 0);
+            this.occupiedVillagePlots.add(new StructureBlueprint.VillagePlot(minX, minZ, maxX, maxZ));
+        }
         if (input.getBooleanOr("HasCampCenter", false)) {
             int cx = input.getIntOr("CampCenterX", 0);
             int cy = input.getIntOr("CampCenterY", 0);
