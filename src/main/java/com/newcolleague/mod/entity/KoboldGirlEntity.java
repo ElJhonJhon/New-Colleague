@@ -164,6 +164,12 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     private static final RawAnimation SWORD_ATTACK_ANIM = RawAnimation.begin().thenPlay("swordattack");
     private static final RawAnimation AXE_ATTACK_ANIM = RawAnimation.begin().thenPlay("axeattack");
     private static final RawAnimation BOW_ATTACK_ANIM = RawAnimation.begin().thenPlay("bowattack");
+    private static final RawAnimation SPEAR_ATTACK_ANIM = RawAnimation.begin().thenPlay("spear_attack");
+    private static final RawAnimation MAGIC_FIRE_ANIM = RawAnimation.begin().thenPlay("magic_fire");
+    private static final RawAnimation MAGIC_FANG_LINEA_ANIM = RawAnimation.begin().thenPlay("magic_fang_linea");
+    private static final RawAnimation MAGIC_FANG_CIRCULO_ANIM = RawAnimation.begin().thenPlay("magic_fang_circulo");
+    private static final RawAnimation MAGIC_LASER_ANIM = RawAnimation.begin().thenPlay("magic_laser");
+    private static final RawAnimation MAGIC_IDIOMA_ANIM = RawAnimation.begin().thenPlay("magic_idioma");
 
     // Mecanica de Hambre y Saturación
     private static final EntityDataAccessor<Integer> DATA_FOOD_LEVEL =
@@ -5016,7 +5022,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public static boolean isSpear(ItemStack stack) {
         if (stack.isEmpty()) return false;
-        return stack.has(DataComponents.KINETIC_WEAPON) || stack.is(ItemTags.SPEARS) || stack.getItem() instanceof TridentItem;
+        if (stack.has(DataComponents.KINETIC_WEAPON) || stack.is(ItemTags.SPEARS) || stack.getItem() instanceof TridentItem) {
+            return true;
+        }
+        String id = stack.getItem().getDescriptionId().toLowerCase();
+        return id.contains("spear") || id.contains("trident") || id.contains("lance") || id.contains("lanza");
     }
 
     public double getWeaponDamage(ItemStack stack) {
@@ -6505,6 +6515,12 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             String queenKey = "queen_" + queenUUID.toString().replace("-", "_");
             player.addTag(TAG_TEACHER_TRIBE_PREFIX + queenKey);
             player.addTag(TAG_MET_TRIBE_PREFIX + queenKey);
+            if (player.level() instanceof ServerLevel serverLevel) {
+                Entity qEnt = serverLevel.getEntity(queenUUID);
+                if (qEnt instanceof KoboldGirlEntity queen && queen.isAlive()) {
+                    queen.triggerMagicIdiomaAnimation();
+                }
+            }
         }
     }
 
@@ -6646,6 +6662,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         // Efectos mágicos de lanzamiento de hechizo sobre el jugador
         if (this.level() instanceof ServerLevel serverLevel) {
+            this.triggerMagicIdiomaAnimation();
             serverLevel.sendParticles(ParticleTypes.ENCHANT, player.getX(), player.getY() + 1.2D, player.getZ(), 45, 0.5D, 0.5D, 0.5D, 0.5D);
             serverLevel.sendParticles(ParticleTypes.PORTAL, player.getX(), player.getY() + 1.0D, player.getZ(), 30, 0.4D, 0.4D, 0.4D, 0.1D);
             serverLevel.sendParticles(ParticleTypes.WITCH, player.getX(), player.getY() + 1.0D, player.getZ(), 20, 0.3D, 0.3D, 0.3D, 0.05D);
@@ -7087,6 +7104,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         private int strafeChangeTimer = 0;
         private boolean strafeClockwise = false;
         private int rangedChargeTicks = 0;
+        private int obstructedAngleTimer = 0;
+        private int heldBowObstructedTicks = 0;
 
         // Variables de combate mágico exclusivo de la Reina
         private int queenSpellCooldown = 0;
@@ -7132,8 +7151,13 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             this.attackCooldown = 0;
             this.leapCooldown = 0;
             this.rangedChargeTicks = 0;
+            this.obstructedAngleTimer = 0;
+            this.heldBowObstructedTicks = 0;
             this.isLeapingForSmash = false;
             this.queenSpellCooldown = 0;
+            if (this.queenBeamChannelTicks > 0) {
+                this.mob.stopTriggeredAnim("attack", "magic_laser");
+            }
             this.queenBeamChannelTicks = 0;
             this.queenFireballBurstRemaining = 0;
             this.queenFireballBurstInterval = 0;
@@ -7151,9 +7175,14 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         @Override
         public void stop() {
             this.isLeapingForSmash = false;
+            if (this.queenBeamChannelTicks > 0) {
+                this.mob.stopTriggeredAnim("attack", "magic_laser");
+            }
             this.queenBeamChannelTicks = 0;
             this.queenFireballBurstRemaining = 0;
             this.rangedChargeTicks = 0;
+            this.obstructedAngleTimer = 0;
+            this.heldBowObstructedTicks = 0;
             if (this.mob.isUsingItem()) {
                 this.mob.stopUsingItem();
                 this.mob.stopTriggeredAnim("attack", "bowattack");
@@ -7167,9 +7196,15 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             LivingEntity target = this.mob.getTarget();
             if (target == null || !target.isAlive() || target.getHealth() <= 0.0F) {
                 this.rangedChargeTicks = 0;
+                this.obstructedAngleTimer = 0;
+                this.heldBowObstructedTicks = 0;
                 if (this.mob.isUsingItem()) {
                     this.mob.stopUsingItem();
                     this.mob.stopTriggeredAnim("attack", "bowattack");
+                }
+                if (this.queenBeamChannelTicks > 0) {
+                    this.mob.stopTriggeredAnim("attack", "magic_laser");
+                    this.queenBeamChannelTicks = 0;
                 }
                 if (this.mob.level() instanceof ServerLevel serverLevel) {
                     this.mob.onSlainTargetDrops(serverLevel, target);
@@ -7178,6 +7213,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             }
 
             this.mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+            if (this.mob.isAnyQueen() || (isRangedWeapon(this.mob.getMainHandItem()) && this.mob.hasArrows())) {
+                this.faceTargetDirectly(target);
+            }
 
             double dist = Math.sqrt(this.mob.distanceToSqr(target));
 
@@ -7228,32 +7266,76 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         // --- Táctica de Arco / Ballesta (Rango y distancia) ---
         private void tickRangedTactic(LivingEntity target, double dist, ItemStack held) {
-            // Si el objetivo está demasiado cerca (< 6 bloques), retroceder / mantener distancia
-            if (dist < 6.0D) {
-                Vec3 away = this.mob.position().subtract(target.position()).normalize();
-                this.mob.getNavigation().moveTo(this.mob.getX() + away.x * 4.0D, this.mob.getY(), this.mob.getZ() + away.z * 4.0D, 1.4D);
-            } else if (dist > 14.0D) {
-                this.mob.getNavigation().moveTo(target, 1.25D);
-            } else {
-                // Distancia óptima (6 a 14 bloques): Strafing evasivo
-                this.strafeChangeTimer++;
-                if (this.strafeChangeTimer > 25) {
-                    this.strafeClockwise = !this.strafeClockwise;
-                    this.strafeChangeTimer = 0;
-                }
-                this.mob.getMoveControl().strafe(0.0F, this.strafeClockwise ? 0.5F : -0.5F);
-            }
-
-            this.mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
+            this.faceTargetDirectly(target);
 
             boolean canSee = this.mob.hasLineOfSight(target);
+            boolean obstructed = this.isLineOfFireObstructed(target);
             boolean isCrossbow = held.getItem() instanceof CrossbowItem;
             // Sincronización exacta con la animación bowattack (duración 1.29s = 26 ticks; tensión máxima a 0.96s = 19 ticks)
             int releaseTick = isCrossbow ? 22 : 19;
             int animEndTick = isCrossbow ? 28 : 26;
 
+            // Manejo de movimiento táctico: retroceso encarando, strafing y búsqueda activa de ángulo despejado
+            if (obstructed) {
+                this.obstructedAngleTimer++;
+                if (this.obstructedAngleTimer > 12 && this.obstructedAngleTimer % 12 == 0) {
+                    this.strafeClockwise = !this.strafeClockwise;
+                }
+                // Si hay un aliado, jugador u otro mob intermedio, detener navegación frontal y
+                // maniobrar lateralmente a velocidad rápida para despejar la línea de tiro
+                this.mob.getNavigation().stop();
+                this.faceTargetDirectly(target);
+                this.mob.getMoveControl().strafe(dist < 5.0D ? -0.6F : (dist > 12.0D ? 0.35F : 0.0F), this.strafeClockwise ? 0.85F : -0.85F);
+            } else {
+                this.obstructedAngleTimer = 0;
+                if (dist < 6.0D) {
+                    // Retroceder de espaldas al movimiento pero de frente al enemigo (backpedal sin darle la espalda)
+                    this.mob.getNavigation().stop();
+                    this.faceTargetDirectly(target);
+                    this.mob.getMoveControl().strafe(-0.75F, this.strafeClockwise ? 0.35F : -0.35F);
+                } else if (dist > 14.0D) {
+                    // Avanzar hacia el objetivo encarando
+                    this.mob.getNavigation().moveTo(target, 1.25D);
+                    this.faceTargetDirectly(target);
+                } else {
+                    // Distancia óptima (6 a 14 bloques): Strafing evasivo
+                    this.mob.getNavigation().stop();
+                    this.faceTargetDirectly(target);
+                    this.strafeChangeTimer++;
+                    if (this.strafeChangeTimer > 25) {
+                        this.strafeClockwise = !this.strafeClockwise;
+                        this.strafeChangeTimer = 0;
+                    }
+                    this.mob.getMoveControl().strafe(0.0F, this.strafeClockwise ? 0.55F : -0.55F);
+                }
+            }
+
             // Manejo de tensión del arco / ballesta y disparo sincronizado
             if (this.rangedChargeTicks > 0) {
+                this.faceTargetDirectly(target);
+
+                // Si la línea de tiro está obstruida justo al llegar al momento de disparar
+                if (this.rangedChargeTicks == releaseTick && obstructed) {
+                    this.heldBowObstructedTicks++;
+                    // Mantener el arco tensado al máximo mientras se maniobra buscando el ángulo (hasta 40 ticks / 2s)
+                    if (this.heldBowObstructedTicks < 40) {
+                        if (!this.mob.isUsingItem()) {
+                            this.mob.startUsingItem(InteractionHand.MAIN_HAND);
+                        }
+                        return; // Esperar al siguiente tick mientras se strafea buscando el ángulo despejado
+                    } else {
+                        // Tiempo agotado sin lograr ángulo limpio: abortar disparo y reubicarse
+                        if (this.mob.isUsingItem()) {
+                            this.mob.stopUsingItem();
+                        }
+                        this.mob.stopTriggeredAnim("attack", "bowattack");
+                        this.rangedChargeTicks = 0;
+                        this.heldBowObstructedTicks = 0;
+                        this.attackCooldown = 15;
+                        return;
+                    }
+                }
+
                 this.rangedChargeTicks++;
 
                 // Mantener item en uso durante la fase de tensado previa al disparo
@@ -7267,7 +7349,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     }
                     this.mob.stopTriggeredAnim("attack", "bowattack");
                     this.rangedChargeTicks = 0;
+                    this.heldBowObstructedTicks = 0;
                 } else if (this.rangedChargeTicks == releaseTick) {
+                    this.heldBowObstructedTicks = 0;
+                    this.faceTargetDirectly(target);
+
                     // Momento exacto de tensión máxima (0.96s / tick 19) -> Salida de la flecha
                     ItemStack arrowStack = this.mob.consumeOneArrow();
                     if (arrowStack.isEmpty()) {
@@ -7295,6 +7381,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 } else if (this.rangedChargeTicks >= animEndTick) {
                     // Fin completo de la animación (1.29s / tick 26) -> Reinicio del ciclo y enfriamiento
                     this.rangedChargeTicks = 0;
+                    this.heldBowObstructedTicks = 0;
                     this.attackCooldown = isCrossbow ? 25 : 18;
 
                     // Si se quedó sin flechas, cambiar de arma de inmediato
@@ -7302,9 +7389,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                         this.mob.equipBestWeapon();
                     }
                 }
-            } else if (this.attackCooldown <= 0 && canSee) {
-                // Iniciar la tensión del arco / ballesta y reproducir la animación bowattack sincronizada
+            } else if (this.attackCooldown <= 0 && canSee && !obstructed) {
+                // Iniciar la tensión del arco / ballesta solo cuando la línea de tiro esté despejada
+                this.faceTargetDirectly(target);
                 this.rangedChargeTicks = 1;
+                this.heldBowObstructedTicks = 0;
                 this.mob.startUsingItem(InteractionHand.MAIN_HAND);
                 this.mob.triggerAnim("attack", "bowattack");
             }
@@ -7481,10 +7570,24 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             }
 
             // 2. POSICIONAMIENTO Y MANIOBRA TÁCTICA DE MAGA
+            this.faceTargetDirectly(target);
+
+            boolean canSee = this.mob.hasLineOfSight(target);
+            boolean obstructed = this.isLineOfFireObstructed(target);
+
+            if (obstructed) {
+                this.obstructedAngleTimer++;
+                if (this.obstructedAngleTimer > 12 && this.obstructedAngleTimer % 12 == 0) {
+                    this.strafeClockwise = !this.strafeClockwise;
+                }
+            } else {
+                this.obstructedAngleTimer = 0;
+            }
+
             if (this.queenBeamChannelTicks > 0) {
                 // Durante la canalización del rayo de guardián se queda concentrada mirando fijamente al objetivo
                 this.mob.getNavigation().stop();
-                this.mob.getLookControl().setLookAt(target, 90.0F, 90.0F);
+                this.faceTargetDirectly(target);
             } else if (this.mob.isInQueenDuel() || this.mob.isInPlayerDuel()) {
                 // Posicionamiento táctico en duelo: Mantener distancia suficiente (5.0 a 7.5 bloques)
                 // para permitir el uso dinámico y constante de toda la variedad de ataques mágicos
@@ -7492,27 +7595,28 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 double barrierRadius = this.mob.getDuelArenaBarrierRadius();
                 double myDistFromCenter = arenaCenter != null ? Math.sqrt(Math.pow(this.mob.getX() - arenaCenter.x, 2) + Math.pow(this.mob.getZ() - arenaCenter.z, 2)) : 0.0D;
 
-                if (dist < 5.0D) {
-                    // Demasiado cerca: Retroceder activamente y crear distancia de combate mágico
-                    Vec3 away = this.mob.position().subtract(target.position()).normalize();
-                    double targetX = this.mob.getX() + away.x * 3.5D;
-                    double targetZ = this.mob.getZ() + away.z * 3.5D;
-                    if (arenaCenter != null) {
-                        double targetDist = Math.sqrt(Math.pow(targetX - arenaCenter.x, 2) + Math.pow(targetZ - arenaCenter.z, 2));
-                        if (targetDist > barrierRadius - 0.4D) {
-                            double scale = (barrierRadius - 0.4D) / targetDist;
-                            targetX = arenaCenter.x + (targetX - arenaCenter.x) * scale;
-                            targetZ = arenaCenter.z + (targetZ - arenaCenter.z) * scale;
-                        }
-                    }
-                    this.mob.getNavigation().moveTo(targetX, this.mob.getY(), targetZ, 1.35D);
-                    this.mob.getMoveControl().strafe(-0.5F, this.strafeClockwise ? 0.45F : -0.45F);
-                } else if (dist > 8.0D) {
-                    // Si está más lejos del rango ideal de la arena, avanzar suavemente
-                    this.mob.getNavigation().moveTo(target, 1.15D);
-                } else {
-                    // Distancia ideal de combate (5.0 a 8.0 bloques): Detener navegación frontal y realizar evasión lateral
+                if (obstructed) {
+                    // En duelo: buscar un ángulo de ataque despejado strafeando en arco circular encarando al objetivo
                     this.mob.getNavigation().stop();
+                    this.faceTargetDirectly(target);
+                    this.mob.getMoveControl().strafe(0.0F, this.strafeClockwise ? 0.8F : -0.8F);
+                } else if (dist < 5.0D) {
+                    // Demasiado cerca: Retroceder activamente encarando al oponente (backpedal con strafe sin darle la espalda)
+                    this.mob.getNavigation().stop();
+                    this.faceTargetDirectly(target);
+                    if (arenaCenter != null && myDistFromCenter > barrierRadius - 1.2D) {
+                        this.mob.getMoveControl().strafe(0.0F, this.strafeClockwise ? 0.75F : -0.75F);
+                    } else {
+                        this.mob.getMoveControl().strafe(-0.75F, this.strafeClockwise ? 0.35F : -0.35F);
+                    }
+                } else if (dist > 8.0D) {
+                    // Si está más lejos del rango ideal de la arena, avanzar suavemente encarando
+                    this.mob.getNavigation().moveTo(target, 1.15D);
+                    this.faceTargetDirectly(target);
+                } else {
+                    // Distancia ideal de combate (5.0 a 8.0 bloques): Detener navegación frontal y realizar evasión lateral encarando
+                    this.mob.getNavigation().stop();
+                    this.faceTargetDirectly(target);
                     this.strafeChangeTimer++;
                     if (this.strafeChangeTimer > 25) {
                         this.strafeClockwise = !this.strafeClockwise;
@@ -7522,14 +7626,20 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 }
             } else {
                 // Distancia óptima de combate mágico (fuera de duelo en campo abierto: 5.5 a 14 bloques)
-                if (dist < 5.5D) {
-                    Vec3 away = this.mob.position().subtract(target.position()).normalize();
-                    this.mob.getNavigation().moveTo(this.mob.getX() + away.x * 5.0D, this.mob.getY(), this.mob.getZ() + away.z * 5.0D, 1.35D);
-                    this.mob.getMoveControl().strafe(-0.5F, this.strafeClockwise ? 0.4F : -0.4F);
+                if (obstructed) {
+                    this.mob.getNavigation().stop();
+                    this.faceTargetDirectly(target);
+                    this.mob.getMoveControl().strafe(dist < 5.0D ? -0.5F : (dist > 12.0D ? 0.35F : 0.0F), this.strafeClockwise ? 0.8F : -0.8F);
+                } else if (dist < 5.5D) {
+                    this.mob.getNavigation().stop();
+                    this.faceTargetDirectly(target);
+                    this.mob.getMoveControl().strafe(-0.75F, this.strafeClockwise ? 0.4F : -0.4F);
                 } else if (dist > 15.0D) {
                     this.mob.getNavigation().moveTo(target, 1.25D);
+                    this.faceTargetDirectly(target);
                 } else {
                     this.mob.getNavigation().stop();
+                    this.faceTargetDirectly(target);
                     this.strafeChangeTimer++;
                     if (this.strafeChangeTimer > 25) {
                         this.strafeClockwise = !this.strafeClockwise;
@@ -7541,11 +7651,19 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
             // 3. CONTINUACIÓN DE RÁFAGA DE FUEGO (SmallFireball burst)
             if (this.queenFireballBurstRemaining > 0) {
+                this.faceTargetDirectly(target);
                 this.queenFireballBurstInterval--;
                 if (this.queenFireballBurstInterval <= 0) {
-                    this.queenFireballBurstInterval = 6;
-                    this.queenFireballBurstRemaining--;
-                    this.castSingleBlazeFireball(serverLevel, target);
+                    if (!obstructed) {
+                        this.queenFireballBurstInterval = 6;
+                        this.queenFireballBurstRemaining--;
+                        this.castSingleBlazeFireball(serverLevel, target);
+                    } else {
+                        // Si la línea se obstruyó durante la ráfaga, strafea para despejar el tiro antes de soltar la siguiente bola
+                        this.mob.getNavigation().stop();
+                        this.faceTargetDirectly(target);
+                        this.mob.getMoveControl().strafe(0.0F, this.strafeClockwise ? 0.8F : -0.8F);
+                    }
                 }
                 return;
             }
@@ -7553,6 +7671,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             // 4. CANALIZACIÓN DEL RAYO DEL GUARDIÁN DEL OCÉANO
             if (this.queenBeamChannelTicks > 0) {
                 this.queenBeamChannelTicks++;
+                this.faceTargetDirectly(target);
 
                 // Efecto visual y sonoro denso del rayo del guardián
                 Vec3 from = this.mob.getEyePosition().add(0.0D, -0.2D, 0.0D);
@@ -7576,16 +7695,17 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     }
                 }
 
-                if (this.queenBeamChannelTicks % 7 == 0) {
-                    float pitch = 0.8F + (this.queenBeamChannelTicks / 30.0F) * 0.7F;
+                if (this.queenBeamChannelTicks % 5 == 0) {
+                    float pitch = 0.85F + (this.queenBeamChannelTicks / 20.0F) * 0.75F;
                     serverLevel.playSound(null, this.mob.getX(), this.mob.getY(), this.mob.getZ(),
                             SoundEvents.GUARDIAN_ATTACK, this.mob.getSoundSource(), 1.0F, pitch);
                 }
 
-                // Culminación del rayo: Impacto y explosión mágica tras 30 ticks (1.5 segundos)
-                if (this.queenBeamChannelTicks >= 30) {
+                // Culminación del rayo: Impacto y explosión mágica sincronizada al finalizar la animación (20 ticks / 1.0 segundo)
+                if (this.queenBeamChannelTicks >= 20) {
+                    this.mob.stopTriggeredAnim("attack", "magic_laser");
                     this.queenBeamChannelTicks = 0;
-                    this.queenSpellCooldown = 35; // Cooldown post-rayo
+                    this.queenSpellCooldown = 25; // Cooldown post-rayo más dinámico
 
                     boolean wasAlive = target.isAlive();
                     target.hurtServer(serverLevel, this.mob.damageSources().indirectMagic(this.mob, this.mob), 9.0F);
@@ -7609,24 +7729,32 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 return;
             }
 
-            if (!this.mob.hasLineOfSight(target)) {
+            if (!canSee) {
                 this.mob.getNavigation().moveTo(target, 1.25D);
+                this.faceTargetDirectly(target);
                 return;
             }
 
-            // A. Evoker Fangs si el objetivo está muy cerca (< 4.0 bloques): Anillo defensivo de colmillos
+            // A. Evoker Fangs si el objetivo está muy cerca (< 4.0 bloques): Anillo defensivo de colmillos en 360 grados
             if (dist <= 4.0D) {
+                this.faceTargetDirectly(target);
                 this.castEvokerFangsRing(serverLevel);
                 this.queenSpellCooldown = 28;
                 return;
             }
 
-            // B. Rango de combate medio/largo: Variedad completa de ataques
-            // Alternar equitativamente entre Rayo del Guardián del Océano, Colmillos de Evocador en hilera y Ráfaga de Fuego de Blaze
+            // Si la línea de tiro está obstruida, no lanzar hechizos direccionales; buscar ángulo despejado primero
+            if (obstructed) {
+                return;
+            }
+
+            // B. Rango de combate medio/largo con ángulo despejado: Variedad completa de ataques
+            this.faceTargetDirectly(target);
             float roll = this.mob.getRandom().nextFloat();
             if (roll < 0.35F && dist >= 4.0D && dist <= 20.0D) {
                 // Hechizo 1: Iniciar canalización del Rayo del Guardián del Océano
                 this.queenBeamChannelTicks = 1;
+                this.mob.triggerMagicLaserAnimation();
                 serverLevel.playSound(null, this.mob.getX(), this.mob.getY(), this.mob.getZ(),
                         SoundEvents.GUARDIAN_ATTACK, this.mob.getSoundSource(), 1.0F, 0.8F);
             } else if (roll < 0.70F && dist <= 16.0D) {
@@ -7641,6 +7769,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
 
         private void castEvokerFangsRing(ServerLevel serverLevel) {
+            LivingEntity target = this.mob.getTarget();
+            if (target != null && target.isAlive()) {
+                this.faceTargetDirectly(target);
+            }
+            this.mob.triggerMagicFangCirculoAnimation();
             serverLevel.playSound(null, this.mob.getX(), this.mob.getY(), this.mob.getZ(),
                     SoundEvents.EVOKER_PREPARE_ATTACK, this.mob.getSoundSource(), 1.0F, 1.2F);
             serverLevel.sendParticles(ParticleTypes.ENCHANT,
@@ -7659,6 +7792,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
 
         private void castEvokerFangsLine(ServerLevel serverLevel, LivingEntity target, double dist) {
+            this.faceTargetDirectly(target);
+            this.mob.triggerMagicFangLineaAnimation();
             serverLevel.playSound(null, this.mob.getX(), this.mob.getY(), this.mob.getZ(),
                     SoundEvents.EVOKER_PREPARE_ATTACK, this.mob.getSoundSource(), 1.0F, 1.0F);
             serverLevel.sendParticles(ParticleTypes.WITCH,
@@ -7684,6 +7819,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
 
         private void castBlazeFireAttack(ServerLevel serverLevel, LivingEntity target, double dist) {
+            this.faceTargetDirectly(target);
+            this.mob.triggerMagicFireAnimation();
             // Exhalación de llamarada frontal con sonido de Blaze
             serverLevel.playSound(null, this.mob.getX(), this.mob.getY(), this.mob.getZ(),
                     SoundEvents.BLAZE_SHOOT, this.mob.getSoundSource(), 1.0F, 1.0F / (this.mob.getRandom().nextFloat() * 0.4F + 0.8F));
@@ -7717,6 +7854,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
 
         private void castSingleBlazeFireball(ServerLevel serverLevel, LivingEntity target) {
+            this.faceTargetDirectly(target);
             Vec3 eye = this.mob.getEyePosition().add(0.0D, -0.15D, 0.0D);
             Vec3 targetPos = target.getBoundingBox().getCenter();
             Vec3 dir = targetPos.subtract(eye).normalize().scale(0.75D);
@@ -7736,6 +7874,66 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             serverLevel.sendParticles(ParticleTypes.FLAME, eye.x, eye.y, eye.z, 6, 0.1D, 0.1D, 0.1D, 0.05D);
         }
 
+        private void faceTargetDirectly(LivingEntity target) {
+            double dx = target.getX() - this.mob.getX();
+            double dy = target.getEyeY() - this.mob.getEyeY();
+            double dz = target.getZ() - this.mob.getZ();
+            double horizDist = Math.sqrt(dx * dx + dz * dz);
+            if (horizDist > 0.0001D) {
+                float targetYaw = (float) (Mth.atan2(dz, dx) * (180.0D / Math.PI)) - 90.0F;
+                float targetPitch = (float) (-(Mth.atan2(dy, horizDist) * (180.0D / Math.PI)));
+                this.mob.setYRot(targetYaw);
+                this.mob.setYBodyRot(targetYaw);
+                this.mob.setYHeadRot(targetYaw);
+                this.mob.setXRot(targetPitch);
+            }
+            this.mob.getLookControl().setLookAt(target, 100.0F, 100.0F);
+        }
+
+        private boolean isLineOfFireObstructed(LivingEntity target) {
+            Vec3 eyePos = this.mob.getEyePosition();
+            Vec3 targetCenter = target.getBoundingBox().getCenter();
+            Vec3 ray = targetCenter.subtract(eyePos);
+            double rayDist = ray.length();
+            if (rayDist < 1.2D) {
+                return false;
+            }
+
+            double minX = Math.min(eyePos.x, targetCenter.x) - 1.2D;
+            double minY = Math.min(eyePos.y, targetCenter.y) - 1.2D;
+            double minZ = Math.min(eyePos.z, targetCenter.z) - 1.2D;
+            double maxX = Math.max(eyePos.x, targetCenter.x) + 1.2D;
+            double maxY = Math.max(eyePos.y, targetCenter.y) + 1.2D;
+            double maxZ = Math.max(eyePos.z, targetCenter.z) + 1.2D;
+            AABB searchBox = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+
+            List<LivingEntity> potentialBlockers = this.mob.level().getEntitiesOfClass(LivingEntity.class, searchBox,
+                    e -> e != this.mob && e != target && e.isAlive() && e.getHealth() > 0.0F && !e.isSpectator() && !e.isPassengerOfSameVehicle(this.mob));
+
+            double rayDistSq = rayDist * rayDist;
+
+            for (LivingEntity blocker : potentialBlockers) {
+                AABB blockerBox = blocker.getBoundingBox().inflate(0.25D);
+                if (blockerBox.clip(eyePos, targetCenter).isPresent()) {
+                    return true;
+                }
+
+                Vec3 bCenter = blocker.getBoundingBox().getCenter();
+                Vec3 toBlocker = bCenter.subtract(eyePos);
+                double dot = toBlocker.x * ray.x + toBlocker.y * ray.y + toBlocker.z * ray.z;
+                double t = dot / rayDistSq;
+                if (t > 0.06D && t < 0.94D) {
+                    Vec3 projection = eyePos.add(ray.scale(t));
+                    double distSq = bCenter.distanceToSqr(projection);
+                    double halfW = blocker.getBbWidth() * 0.5D + 0.35D;
+                    if (distSq <= halfW * halfW) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         private static boolean isRangedWeapon(ItemStack stack) {
             if (stack.isEmpty()) return false;
             return stack.getItem() instanceof BowItem || stack.getItem() instanceof CrossbowItem;
@@ -7748,7 +7946,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         private static boolean isSpear(ItemStack stack) {
             if (stack.isEmpty()) return false;
-            return stack.has(DataComponents.KINETIC_WEAPON) || stack.is(ItemTags.SPEARS) || stack.getItem() instanceof TridentItem;
+            if (stack.has(DataComponents.KINETIC_WEAPON) || stack.is(ItemTags.SPEARS) || stack.getItem() instanceof TridentItem) {
+            return true;
+        }
+        String id = stack.getItem().getDescriptionId().toLowerCase();
+        return id.contains("spear") || id.contains("trident") || id.contains("lance") || id.contains("lanza");
         }
     }
 
@@ -11230,6 +11432,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         String anim;
         if (isRangedWeapon(mainHand)) {
             return; // El ataque a distancia se gestiona y sincroniza exclusivamente en KoboldAdaptiveCombatGoal
+        } else if (isSpear(mainHand)) {
+            anim = "spear_attack";
         } else if (isAxe(mainHand)) {
             anim = "axeattack";
         } else {
@@ -11238,13 +11442,55 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         this.triggerAnim("attack", anim);
     }
 
+    public void triggerSpearAttackAnimation() {
+        if (!this.level().isClientSide() && !this.isSleeping()) {
+            this.triggerAnim("attack", "spear_attack");
+        }
+    }
+
+    public void triggerMagicFireAnimation() {
+        if (!this.level().isClientSide() && !this.isSleeping()) {
+            this.triggerAnim("attack", "magic_fire");
+        }
+    }
+
+    public void triggerMagicFangLineaAnimation() {
+        if (!this.level().isClientSide() && !this.isSleeping()) {
+            this.triggerAnim("attack", "magic_fang_linea");
+        }
+    }
+
+    public void triggerMagicFangCirculoAnimation() {
+        if (!this.level().isClientSide() && !this.isSleeping()) {
+            this.triggerAnim("attack", "magic_fang_circulo");
+        }
+    }
+
+    public void triggerMagicLaserAnimation() {
+        if (!this.level().isClientSide() && !this.isSleeping()) {
+            this.triggerAnim("attack", "magic_laser");
+        }
+    }
+
+    public void triggerMagicIdiomaAnimation() {
+        if (!this.level().isClientSide() && !this.isSleeping()) {
+            this.triggerAnim("attack", "magic_idioma");
+        }
+    }
+
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
         controllers.add(new AnimationController<>("movement", 5, this::movementPredicate));
         controllers.add(new AnimationController<>("attack", 2, state -> PlayState.STOP)
                 .triggerableAnim("swordattack", SWORD_ATTACK_ANIM)
                 .triggerableAnim("axeattack", AXE_ATTACK_ANIM)
-                .triggerableAnim("bowattack", BOW_ATTACK_ANIM));
+                .triggerableAnim("bowattack", BOW_ATTACK_ANIM)
+                .triggerableAnim("spear_attack", SPEAR_ATTACK_ANIM)
+                .triggerableAnim("magic_fire", MAGIC_FIRE_ANIM)
+                .triggerableAnim("magic_fang_linea", MAGIC_FANG_LINEA_ANIM)
+                .triggerableAnim("magic_fang_circulo", MAGIC_FANG_CIRCULO_ANIM)
+                .triggerableAnim("magic_laser", MAGIC_LASER_ANIM)
+                .triggerableAnim("magic_idioma", MAGIC_IDIOMA_ANIM));
     }
 
     private PlayState movementPredicate(AnimationTest<KoboldGirlEntity> state) {

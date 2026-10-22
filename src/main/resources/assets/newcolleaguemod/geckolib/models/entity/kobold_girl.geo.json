@@ -48,7 +48,7 @@
 				{
 					"name": "PI",
 					"parent": "Parpados",
-					"pivot": [0, 27, 0],
+					"pivot": [2, 28, -3],
 					"cubes": [
 						{"origin": [1, 27, -3.01], "size": [2, 2, 0], "uv": [12, 28]}
 					]
@@ -56,7 +56,7 @@
 				{
 					"name": "PD",
 					"parent": "Parpados",
-					"pivot": [0, 27, 0],
+					"pivot": [-2, 28, -3],
 					"cubes": [
 						{"origin": [-3, 27, -3.01], "size": [2, 2, 0], "uv": [24, 18]}
 					]
@@ -186,7 +186,7 @@
 				{
 					"name": "brazaleteI",
 					"parent": "Izq",
-					"pivot": [2.97, 20.8, 0],
+					"pivot": [5, 14.5, 0],
 					"cubes": [
 						{"origin": [1.96723, 13.79639, -2], "size": [4, 1, 4], "pivot": [2.97, 20.8, 0], "rotation": [2.5, 0, -10], "uv": [36, 18]}
 					]
@@ -202,7 +202,7 @@
 				{
 					"name": "brazaleteD",
 					"parent": "Der",
-					"pivot": [-3.01, 20.8, 0],
+					"pivot": [-5, 14.5, 0],
 					"cubes": [
 						{"origin": [-6.01741, 13.7946, -2], "size": [4, 1, 4], "pivot": [-3.01, 20.8, 0], "rotation": [0, 0, 10], "uv": [36, 23]}
 					]
@@ -242,7 +242,7 @@
 				{
 					"name": "piernaD",
 					"parent": "Caderas",
-					"pivot": [-2, 11, 0],
+					"pivot": [-1.5, 12, 0],
 					"cubes": [
 						{"origin": [-3, 6, -2], "size": [3, 5, 4], "uv": [24, 0]},
 						{
@@ -272,7 +272,7 @@
 				{
 					"name": "piernaI",
 					"parent": "Caderas",
-					"pivot": [2, 11, 0],
+					"pivot": [1.5, 12, 0],
 					"cubes": [
 						{"origin": [0, 6, -2], "size": [3, 5, 4], "uv": [24, 9]},
 						{

@@ -286,6 +286,7 @@ public class BaculoEventHandler {
                     // Si la Reina sigue presente en el mundo, hacerla asentir y festejar
                     Entity queenEntity = serverLevel.getEntity(session.getQueenUUID());
                     if (queenEntity instanceof KoboldGirlEntity queen && queen.isAlive()) {
+                        queen.triggerMagicIdiomaAnimation();
                         queen.playSound(SoundEvents.VILLAGER_YES, 0.9F, 1.1F);
                         serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER, queen.getX(), queen.getY() + 1.2D, queen.getZ(), 12, 0.4D, 0.4D, 0.4D, 0.05D);
                     }
