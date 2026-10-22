@@ -21,6 +21,7 @@ public record QueenDialogueActionPayload(int queenEntityId, int actionId) implem
     public static final int ACTION_RULER_CALL_ALL_GUARD = 6;
     public static final int ACTION_RULER_COLLECT_TRIBUTES = 7;
     public static final int ACTION_RULER_TRIBE_REPORT = 8;
+    public static final int ACTION_RULER_EXPANSION_MENU = 9;
 
     public static final Type<QueenDialogueActionPayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(NewColleagueMod.MODID, "queen_dialogue_action"));

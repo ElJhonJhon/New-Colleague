@@ -43,7 +43,7 @@ public class QueenDialogueScreen extends Screen {
         int btnHeight = 20;
 
         if (this.stage == Stage.RULER_GOVERNANCE) {
-            int startY = centerY - 55;
+            int startY = centerY - 70;
 
             // 1. Orden General: ¡Todas síganme!
             this.addRenderableWidget(Button.builder(
@@ -67,7 +67,7 @@ public class QueenDialogueScreen extends Screen {
                         ));
                         this.onClose();
                     }
-            ).bounds(centerX - btnWidth / 2, startY + 24, btnWidth, btnHeight).build());
+            ).bounds(centerX - btnWidth / 2, startY + 22, btnWidth, btnHeight).build());
 
             // 3. Orden General: ¡Toda la tribu en guardia!
             this.addRenderableWidget(Button.builder(
@@ -79,7 +79,7 @@ public class QueenDialogueScreen extends Screen {
                         ));
                         this.onClose();
                     }
-            ).bounds(centerX - btnWidth / 2, startY + 48, btnWidth, btnHeight).build());
+            ).bounds(centerX - btnWidth / 2, startY + 44, btnWidth, btnHeight).build());
 
             // 4. Recaudar tributos de la tribu
             this.addRenderableWidget(Button.builder(
@@ -91,7 +91,7 @@ public class QueenDialogueScreen extends Screen {
                         ));
                         this.onClose();
                     }
-            ).bounds(centerX - btnWidth / 2, startY + 72, btnWidth, btnHeight).build());
+            ).bounds(centerX - btnWidth / 2, startY + 66, btnWidth, btnHeight).build());
 
             // 5. Censo y reporte de la tribu
             this.addRenderableWidget(Button.builder(
@@ -103,13 +103,25 @@ public class QueenDialogueScreen extends Screen {
                         ));
                         this.onClose();
                     }
-            ).bounds(centerX - btnWidth / 2, startY + 96, btnWidth, btnHeight).build());
+            ).bounds(centerX - btnWidth / 2, startY + 88, btnWidth, btnHeight).build());
 
-            // 6. Cerrar
+            // 6. Proyectos y expansión tribal
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("🏗 Proyectos y Expansión Tribal").withStyle(ChatFormatting.LIGHT_PURPLE, ChatFormatting.BOLD),
+                    btn -> {
+                        ClientPacketDistributor.sendToServer(new QueenDialogueActionPayload(
+                                this.queenEntityId,
+                                QueenDialogueActionPayload.ACTION_RULER_EXPANSION_MENU
+                        ));
+                        this.onClose();
+                    }
+            ).bounds(centerX - btnWidth / 2, startY + 110, btnWidth, btnHeight).build());
+
+            // 7. Cerrar
             this.addRenderableWidget(Button.builder(
                     Component.literal("Cerrar").withStyle(ChatFormatting.GRAY),
                     btn -> this.onClose()
-            ).bounds(centerX - 60, startY + 122, 120, btnHeight).build());
+            ).bounds(centerX - 60, startY + 134, 120, btnHeight).build());
 
         } else if (this.stage == Stage.MAIN_MENU) {
             // Opción 1: "Solo estoy de paso"
@@ -210,9 +222,9 @@ public class QueenDialogueScreen extends Screen {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
         int cardWidth = 280;
-        int cardHeight = this.stage == Stage.RULER_GOVERNANCE ? 210 : 150;
+        int cardHeight = this.stage == Stage.RULER_GOVERNANCE ? 230 : 150;
         int cardLeft = centerX - cardWidth / 2;
-        int cardTop = this.stage == Stage.RULER_GOVERNANCE ? centerY - 100 : centerY - 65;
+        int cardTop = this.stage == Stage.RULER_GOVERNANCE ? centerY - 110 : centerY - 65;
         int cardRight = cardLeft + cardWidth;
         int cardBottom = cardTop + cardHeight;
 
