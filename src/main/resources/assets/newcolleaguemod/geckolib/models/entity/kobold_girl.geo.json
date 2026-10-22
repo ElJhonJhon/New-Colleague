@@ -6,19 +6,19 @@
 				"identifier": "geometry.Kobold",
 				"texture_width": 64,
 				"texture_height": 64,
-				"visible_bounds_width": 3,
+				"visible_bounds_width": 4,
 				"visible_bounds_height": 3.5,
 				"visible_bounds_offset": [0, 1.25, 0]
 			},
 			"bones": [
 				{
 					"name": "cuerpo",
-					"pivot": [0, 0, 0]
+					"pivot": [0, 16, 0]
 				},
 				{
 					"name": "Cabeza",
 					"parent": "cuerpo",
-					"pivot": [0, 23, 0],
+					"pivot": [0, 14, 0],
 					"cubes": [
 						{"origin": [-3, 23, -3], "size": [6, 6, 6], "uv": [0, 0]}
 					]
@@ -64,9 +64,21 @@
 				{
 					"name": "Osico",
 					"parent": "Cabeza",
+					"pivot": [-0.5, 23, 0]
+				},
+				{
+					"name": "A",
+					"parent": "Osico",
 					"pivot": [-0.5, 23, 0],
 					"cubes": [
-						{"origin": [-1.5, 24, -5], "size": [3, 1, 3], "uv": [38, 0]},
+						{"origin": [-1.5, 24, -5], "size": [3, 1, 3], "uv": [38, 0]}
+					]
+				},
+				{
+					"name": "B",
+					"parent": "Osico",
+					"pivot": [-0.5, 24, -3],
+					"cubes": [
 						{"origin": [-1.5, 23, -5], "size": [3, 1, 3], "uv": [38, 4]}
 					]
 				},
@@ -131,19 +143,24 @@
 					]
 				},
 				{
-					"name": "torsoS",
-					"parent": "cuerpo",
+					"name": "cuello",
+					"parent": "Cabeza",
 					"pivot": [0, 18, 0],
 					"cubes": [
 						{"origin": [-1, 21, -1], "size": [2, 3, 2], "uv": [38, 13]}
 					]
 				},
 				{
+					"name": "torsoS",
+					"parent": "cuerpo",
+					"pivot": [0, 14, 0]
+				},
+				{
 					"name": "Pecho",
 					"parent": "torsoS",
 					"pivot": [0, 18, 0],
 					"cubes": [
-						{"origin": [-3, 19, -4], "size": [6, 3, 6], "pivot": [0, 20, 1], "rotation": [22.5, 0, 0], "uv": [0, 12]}
+						{"origin": [-3, 19.42095, -3.91627], "size": [6, 3, 6], "pivot": [0, 20, 2.1], "rotation": [22.5, 0, 0], "uv": [0, 12]}
 					]
 				},
 				{
@@ -155,9 +172,16 @@
 					"name": "Izq",
 					"parent": "brazos",
 					"pivot": [2.97, 20.8, 0],
+					"rotation": [0, 0, -0.5],
 					"cubes": [
 						{"origin": [2.96723, 11.79639, -1], "size": [2, 9, 2], "pivot": [2.97, 20.8, 0], "rotation": [2.5, 0, -10], "uv": [24, 36]}
 					]
+				},
+				{
+					"name": "left_item",
+					"parent": "Izq",
+					"pivot": [5.5, 12.1, 0.35],
+					"rotation": [0, 0, -10]
 				},
 				{
 					"name": "brazaleteI",
@@ -184,8 +208,19 @@
 					]
 				},
 				{
+					"name": "rigth_item",
+					"parent": "Der",
+					"pivot": [-5, 15.07, 2],
+					"rotation": [0, 0, 10]
+				},
+				{
 					"name": "torsoI",
 					"parent": "cuerpo",
+					"pivot": [0, 14, 0]
+				},
+				{
+					"name": "barriga",
+					"parent": "torsoI",
 					"pivot": [0, 14, 0],
 					"cubes": [
 						{"origin": [-2, 14, -2], "size": [4, 6, 4], "uv": [20, 21]}
@@ -194,6 +229,11 @@
 				{
 					"name": "Caderas",
 					"parent": "torsoI",
+					"pivot": [0, 14, 0]
+				},
+				{
+					"name": "cadera",
+					"parent": "Caderas",
 					"pivot": [0, 14, 0],
 					"cubes": [
 						{"origin": [-3, 11, -2], "size": [6, 3, 4], "uv": [0, 21]}
@@ -206,9 +246,9 @@
 					"cubes": [
 						{"origin": [-3, 6, -2], "size": [3, 5, 4], "uv": [24, 0]},
 						{
-							"origin": [-3, 6.065, -1.45],
-							"size": [3, 2, 3.451],
-							"pivot": [0, 6.02561, 2.14165],
+							"origin": [-2.991, 6.065, -1.45],
+							"size": [2.99, 2, 3.451],
+							"pivot": [-0.001, 6.02561, 2.14165],
 							"rotation": [30, 0, 0],
 							"uv": {
 								"north": {"uv": [46, 13], "uv_size": [3, 2]},
@@ -218,20 +258,27 @@
 								"up": {"uv": [9, 46.5], "uv_size": [-3, -3.5]},
 								"down": {"uv": [12, 46.5], "uv_size": [-3, -3.5]}
 							}
-						},
+						}
+					]
+				},
+				{
+					"name": "piernaDI",
+					"parent": "piernaD",
+					"pivot": [-1, 4.3, -1],
+					"cubes": [
 						{"origin": [-3, 0, -1], "size": [3, 6, 3], "uv": [12, 31]}
 					]
 				},
 				{
 					"name": "piernaI",
 					"parent": "Caderas",
-					"pivot": [0, 11, 0],
+					"pivot": [2, 11, 0],
 					"cubes": [
 						{"origin": [0, 6, -2], "size": [3, 5, 4], "uv": [24, 9]},
 						{
-							"origin": [0, 6.065, -1.45],
-							"size": [3, 2, 3.451],
-							"pivot": [0, 6.02561, 2.14165],
+							"origin": [0.009, 6.065, -1.45],
+							"size": [2.99, 2, 3.451],
+							"pivot": [-0.001, 6.02561, 2.14165],
 							"rotation": [30, 0, 0],
 							"uv": {
 								"north": {"uv": [44, 42], "uv_size": [3, 2]},
@@ -241,14 +288,21 @@
 								"up": {"uv": [3, 46.5], "uv_size": [-3, -3.5]},
 								"down": {"uv": [6, 46.5], "uv_size": [-3, -3.5]}
 							}
-						},
+						}
+					]
+				},
+				{
+					"name": "piernaII",
+					"parent": "piernaI",
+					"pivot": [1.5, 4.3, -1],
+					"cubes": [
 						{"origin": [0, 0, -1], "size": [3, 6, 3], "uv": [0, 28]}
 					]
 				},
 				{
 					"name": "cola",
 					"parent": "Caderas",
-					"pivot": [0, 12, 0],
+					"pivot": [0, 12, 1],
 					"cubes": [
 						{"origin": [-1.25, 11.3, 1], "size": [2.5, 2.5, 4], "uv": [0, 37]}
 					]
@@ -256,25 +310,25 @@
 				{
 					"name": "cola1",
 					"parent": "cola",
-					"pivot": [0.25, 11.3, 2],
+					"pivot": [0, 12, 5],
 					"cubes": [
-						{"origin": [-1, 11.53134, 4.99083], "size": [2, 2, 3], "pivot": [0, 11.52, 5.03099], "rotation": [35, 0, 0], "uv": [38, 8]}
+						{"origin": [-1, 11.25581, 4.29422], "size": [2, 2, 3], "pivot": [0, 12.5, 4.25], "rotation": [35, 0, 0], "uv": [38, 8]}
 					]
 				},
 				{
 					"name": "cola2",
 					"parent": "cola1",
-					"pivot": [0.25, 11.3, 2],
+					"pivot": [0, 13, 7],
 					"cubes": [
-						{"origin": [-0.78, 13.25, 6.3], "size": [1.6, 1.6, 3], "pivot": [-0.18, 14.05781, 6.91374], "rotation": [35, 0, 0], "uv": [12, 40]}
+						{"origin": [-0.78, 12.87834, 6.42777], "size": [1.6, 1.6, 3], "pivot": [0, 13.7, 6.399], "rotation": [35, 0, 0], "uv": [12, 40]}
 					]
 				},
 				{
 					"name": "cola3",
 					"parent": "cola2",
-					"pivot": [0.25, 11.3, 2],
+					"pivot": [0, 14, 8.49999],
 					"cubes": [
-						{"origin": [-0.63, 14.6, 8], "size": [1.3, 1.3, 3], "pivot": [-0.33, 15.40781, 8.61374], "rotation": [47.5, 0, 0], "uv": [40, 28]}
+						{"origin": [-0.58185, 14.12015, 8.18227], "size": [1.3, 1.3, 3], "pivot": [0.07, 15, 8.18], "rotation": [47.5, 0, 0], "uv": [40, 28]}
 					]
 				}
 			]
