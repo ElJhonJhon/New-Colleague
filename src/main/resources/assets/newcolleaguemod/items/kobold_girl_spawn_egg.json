@@ -1,6 +1,6 @@
 {
   "model": {
     "type": "minecraft:model",
-    "model": "minecraft:item/villager_spawn_egg"
+    "model": "newcolleaguemod:item/kobold_girl_spawn_egg"
   }
 }

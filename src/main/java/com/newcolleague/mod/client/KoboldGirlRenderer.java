@@ -4,6 +4,7 @@ import com.geckolib.constant.dataticket.DataTicket;
 import com.geckolib.renderer.GeoEntityRenderer;
 import com.geckolib.renderer.base.BoneSnapshots;
 import com.geckolib.renderer.base.RenderPassInfo;
+import com.geckolib.renderer.layer.builtin.ItemInHandGeoLayer;
 import com.newcolleague.mod.entity.KoboldGirlEntity;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.state.LivingEntityRenderState;
@@ -13,9 +14,11 @@ public class KoboldGirlRenderer extends GeoEntityRenderer<KoboldGirlEntity, Livi
 
     public static final DataTicket<Boolean> IS_QUEEN = DataTicket.create("is_queen", Boolean.class);
 
+    @SuppressWarnings({"rawtypes", "unchecked"})
     public KoboldGirlRenderer(EntityRendererProvider.Context renderManager) {
         super(renderManager, new KoboldGirlModel());
         this.shadowRadius = 0.5F;
+        this.withRenderLayer(new ItemInHandGeoLayer(renderManager, this, "rigth_item", "left_item"));
     }
 
     @Override

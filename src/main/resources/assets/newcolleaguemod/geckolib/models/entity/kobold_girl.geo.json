@@ -172,9 +172,16 @@
 					"name": "Izq",
 					"parent": "brazos",
 					"pivot": [2.97, 20.8, 0],
+					"rotation": [0, 0, -0.5],
 					"cubes": [
 						{"origin": [2.96723, 11.79639, -1], "size": [2, 9, 2], "pivot": [2.97, 20.8, 0], "rotation": [2.5, 0, -10], "uv": [24, 36]}
 					]
+				},
+				{
+					"name": "left_item",
+					"parent": "Izq",
+					"pivot": [5.5, 12.1, 0.35],
+					"rotation": [0, 0, -10]
 				},
 				{
 					"name": "brazaleteI",
@@ -199,6 +206,12 @@
 					"cubes": [
 						{"origin": [-6.01741, 13.7946, -2], "size": [4, 1, 4], "pivot": [-3.01, 20.8, 0], "rotation": [0, 0, 10], "uv": [36, 23]}
 					]
+				},
+				{
+					"name": "rigth_item",
+					"parent": "Der",
+					"pivot": [-5.5, 12.07, 0.05],
+					"rotation": [0, 0, 10]
 				},
 				{
 					"name": "torsoI",

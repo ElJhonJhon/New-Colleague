@@ -350,7 +350,6 @@
 			}
 		},
 		"swordattack": {
-			"loop": true,
 			"animation_length": 0.75,
 			"bones": {
 				"torsoS": {
@@ -954,6 +953,109 @@
 				"piernaII": {
 					"rotation": {
 						"vector": [27.5, 0, 0]
+					}
+				}
+			}
+		},
+		"bowattack": {
+			"animation_length": 1.2917,
+			"bones": {
+				"torsoS": {
+					"rotation": {
+						"vector": [0, 30, 0]
+					}
+				},
+				"brazos": {
+					"rotation": {
+						"vector": [-2.5, 0, 0]
+					}
+				},
+				"torsoI": {
+					"rotation": {
+						"vector": [0, 30, 0]
+					}
+				},
+				"piernaD": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.2917": {
+							"vector": [-22.5, 0, 0]
+						},
+						"0.625": {
+							"vector": [0, 0, 0]
+						},
+						"0.9583": {
+							"vector": [22.5, 0, 0]
+						},
+						"1.2917": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"piernaI": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.2917": {
+							"vector": [22.5, 0, 0]
+						},
+						"0.625": {
+							"vector": [0, 0, 0]
+						},
+						"0.9583": {
+							"vector": [-22.5, 0, 0]
+						},
+						"1.2917": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"Pecho": {
+					"rotation": {
+						"0.0": {
+							"vector": [0, 0, 0]
+						},
+						"0.625": {
+							"vector": [-5, 0, 0]
+						},
+						"1.2917": {
+							"vector": [0, 0, 0]
+						}
+					}
+				},
+				"Izq": {
+					"rotation": {
+						"vector": [-90, 20, 0]
+					}
+				},
+				"Der": {
+					"rotation": {
+						"vector": [-80.9707, -48.4075, -14.4639]
+					},
+					"position": {
+						"0.0": {
+							"vector": [0, 0, -1]
+						},
+						"0.2917": {
+							"vector": [-1, 0, 1]
+						},
+						"0.625": {
+							"vector": [-3, 0, 3]
+						},
+						"0.9583": {
+							"vector": [-4, 0, 4]
+						},
+						"1.2917": {
+							"vector": [0, 0, -1]
+						}
+					}
+				},
+				"left_item": {
+					"rotation": {
+						"vector": [0, 0, -32.5]
 					}
 				}
 			}

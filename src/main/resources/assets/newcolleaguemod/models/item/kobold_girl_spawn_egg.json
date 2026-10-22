@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "newcolleaguemod:item/kobold_spawn_egg"
+  }
+}
