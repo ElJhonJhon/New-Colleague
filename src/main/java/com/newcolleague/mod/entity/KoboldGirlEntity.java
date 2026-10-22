@@ -88,6 +88,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.projectile.EvokerFangs;
 import net.minecraft.world.entity.projectile.hurtingprojectile.SmallFireball;
 import net.minecraft.world.entity.projectile.arrow.Arrow;
+import net.minecraft.world.entity.projectile.arrow.AbstractArrow;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
@@ -1658,16 +1659,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             this.isSpectatingDuel = false;
             return false;
         }
-        if (this.isSpectatingDuel) {
-            return true;
-        }
-        QueenDuel duel = getNearbyQueenDuel(this.level(), this.position(), 28.0D);
-        if (duel != null && duel.isActive()) {
-            if (this.hasLineOfSight(duel.queen1) || (duel.queen2 != null && this.hasLineOfSight(duel.queen2))) {
-                return true;
-            }
-        }
-        return false;
+        return this.isSpectatingDuel;
     }
 
     public void setSpectatingDuel(boolean spectating) {
@@ -1722,7 +1714,6 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     @Override
     public void notifyTrade(MerchantOffer offer) {
-        offer.increaseUses();
         this.ambientSoundTime = -this.getAmbientSoundInterval();
         this.playSound(this.getNotifyTradeSound(), this.getSoundVolume(), this.getVoicePitch());
         this.completedPacifistTrades++;
@@ -1880,18 +1871,18 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     public MerchantOffers createPacifistOffers() {
         MerchantOffers offers = new MerchantOffers();
 
-        // 1. Armas para la Guardia: 2 Espadas de Hierro (aunque al parecer la reina hace descuento y lo baja a uno todo XD)
+        // 1. Armas para la Guardia: 2 Espadas de Hierro (1 en cada ranura de tributo)
         offers.add(createSingleTributeOffer(
-                Items.IRON_SWORD, 2,
-                null, 0,
+                Items.IRON_SWORD, 1,
+                Items.IRON_SWORD, 1,
                 "Espadas para la Guardia",
                 "Armas forjadas para defender a la tribu contra criaturas hostiles"
         ));
 
-        // 2. Armamento a Distancia: 2 Ballestas
+        // 2. Armamento a Distancia: 2 Ballestas (1 en cada ranura de tributo)
         offers.add(createSingleTributeOffer(
-                Items.CROSSBOW, 2,
-                null, 0,
+                Items.CROSSBOW, 1,
+                Items.CROSSBOW, 1,
                 "Ballestas para la Guardia",
                 "Armas a distancia para que las centinelas y cazadoras defiendan el campamento"
         ));
@@ -1904,18 +1895,18 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 "Carne fresca (res, cerdo, cordero o pollo) para alimentar y nutrir a la tribu"
         ));
 
-        // 4. Herramientas de Silvicultura: 2 Hachas de Hierro
+        // 4. Herramientas de Silvicultura: 2 Hachas de Hierro (1 en cada ranura de tributo)
         offers.add(createSingleTributeOffer(
-                Items.IRON_AXE, 2,
-                null, 0,
+                Items.IRON_AXE, 1,
+                Items.IRON_AXE, 1,
                 "Hachas de Silvicultura",
                 "Herramientas para talar madera y construir refugios para el pueblo"
         ));
 
-        // 5. Armaduras de Protección: 2 Petos de Hierro
+        // 5. Armaduras de Protección: 2 Petos de Hierro (1 en cada ranura de tributo)
         offers.add(createSingleTributeOffer(
-                Items.IRON_CHESTPLATE, 2,
-                null, 0,
+                Items.IRON_CHESTPLATE, 1,
+                Items.IRON_CHESTPLATE, 1,
                 "Armaduras de Hierro",
                 "Protección de hierro macizo para las guerreras de la vanguardia"
         ));
@@ -2560,6 +2551,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public boolean isAssignedBedValid() {
         if (this.assignedBedPos == null) return false;
+        if (!this.level().isLoaded(this.assignedBedPos)) {
+            return true; // Preservar la cama mientras el chunk esté descargado
+        }
         BlockState state = this.level().getBlockState(this.assignedBedPos);
         return state.getBlock() instanceof BedBlock;
     }
@@ -2734,7 +2728,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (entity instanceof ArmorStand stand && stand.isAlive()) {
             return stand;
         }
-        this.clearAssignedArmorStand();
+        if (entity != null) {
+            this.clearAssignedArmorStand();
+        }
         return null;
     }
 
@@ -2842,10 +2838,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             return true;
         }
 
-        // Revisar también si otra Kobold Girl viva en el área tiene asignada esta misma cama
+        // Revisar también si otra Kobold Girl viva en el área local tiene asignada esta misma cama
         List<KoboldGirlEntity> nearbyKobolds = this.level().getEntitiesOfClass(
                 KoboldGirlEntity.class,
-                new AABB(bedHeadPos).inflate(320.0D),
+                new AABB(bedHeadPos).inflate(32.0D, 8.0D, 32.0D),
                 k -> k != this && k.isAlive()
         );
         for (KoboldGirlEntity k : nearbyKobolds) {
@@ -5151,6 +5147,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public boolean hasArrows() {
         if (this.getProfession() == KoboldProfession.VIGILANT) return true;
+        return this.hasPhysicalArrows();
+    }
+
+    public boolean hasPhysicalArrows() {
         if (this.getOffhandItem().is(ItemTags.ARROWS)) return true;
         for (int i = 0; i < this.inventory.getContainerSize(); i++) {
             ItemStack stack = this.inventory.getItem(i);
@@ -7062,7 +7062,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             }
 
             boolean hasFood = this.mob.hasFoodInInventory();
-            boolean hasArrows = this.mob.hasArrows();
+            boolean hasArrows = this.mob.hasPhysicalArrows();
 
             if (!hasFood && !hasArrows) {
                 return false;
@@ -7111,7 +7111,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     && !this.targetKobold.isSleeping()
                     && this.mob.hasLineOfSight(this.targetKobold)
                     && this.mob.distanceToSqr(this.targetKobold) < 144.0D
-                    && this.needsAssistance(this.targetKobold, this.mob.hasFoodInInventory(), this.mob.hasArrows());
+                    && this.needsAssistance(this.targetKobold, this.mob.hasFoodInInventory(), this.mob.hasPhysicalArrows());
         }
 
         @Override
@@ -7165,8 +7165,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     }
                 }
 
-                // 2. Compartir flechas si la compañera tiene arma a distancia pero no tiene flechas, y esta Kobold tiene flechas
-                if (this.mob.hasArrows() && this.targetKobold.hasRangedWeapon() && !this.targetKobold.hasArrows()) {
+                // 2. Compartir flechas si la compañera tiene arma a distancia pero no tiene flechas, y esta Kobold tiene flechas físicas
+                if (this.mob.hasPhysicalArrows() && this.targetKobold.hasRangedWeapon() && !this.targetKobold.hasArrows()) {
                     for (int i = 0; i < this.mob.getInventory().getContainerSize(); i++) {
                         ItemStack stack = this.mob.getInventory().getItem(i);
                         if (stack.is(ItemTags.ARROWS)) {
@@ -7478,6 +7478,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     Arrow arrow = new Arrow(this.mob.level(), this.mob, arrowStack, held);
                     if (this.mob.getProfession() == KoboldProfession.VIGILANT) {
                         arrow.setBaseDamage(2.0D * 1.05D);
+                        arrow.pickup = AbstractArrow.Pickup.DISALLOWED;
                     }
                     double dx = target.getX() - this.mob.getX();
                     double dy = target.getY(0.33D) - arrow.getY();
@@ -8661,7 +8662,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
 
         private @Nullable BlockPos findNearbyChestWithItem(Level level, Item item) {
-            List<BlockPos> chests = findNearbyUniqueChests(level, this.kobold.blockPosition(), 32, 12);
+            List<BlockPos> chests = findNearbyUniqueChests(level, this.kobold.blockPosition(), 16, 6);
             for (BlockPos pos : chests) {
                 Container c = getChestContainer(level, pos);
                 if (c == null || c.isEmpty()) continue;
@@ -11942,12 +11943,6 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             WITNESSED_BACULO_TRIBES.add(this.getTribeName());
         }
         this.baculoStareCooldown = input.getIntOr("BaculoStareCooldown", 0);
-        if (input.getBooleanOr("HasAssignedBed", false)) {
-            int bx = input.getIntOr("BedX", 0);
-            int by = input.getIntOr("BedY", 0);
-            int bz = input.getIntOr("BedZ", 0);
-            this.setAssignedBed(new BlockPos(bx, by, bz));
-        }
         if (input.getBooleanOr("HasAssignedArmorStand", false)) {
             String uuidStr = input.getStringOr("ArmorStandUUID", "");
             if (!uuidStr.isEmpty()) {
@@ -11958,6 +11953,15 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 } catch (IllegalArgumentException ignored) {
                 }
             }
+        }
+        if (input.getBooleanOr("HasAssignedBed", false)) {
+            int bx = input.getIntOr("BedX", 0);
+            int by = input.getIntOr("BedY", 0);
+            int bz = input.getIntOr("BedZ", 0);
+            BlockPos bPos = new BlockPos(bx, by, bz);
+            this.assignedBedPos = bPos;
+            CLAIMED_BEDS.put(bPos, this.getUUID());
+            this.setHomeTo(bPos, 100);
         }
         this.needsArmorRetrieval = input.getBooleanOr("NeedsArmorRetrieval", false);
         this.pacifistRouteChosen = input.getBooleanOr("PacifistRouteChosen", false);
