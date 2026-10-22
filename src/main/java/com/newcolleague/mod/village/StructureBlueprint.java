@@ -112,31 +112,31 @@ public class StructureBlueprint {
         // Estructura en A de lana (Tienda acogedora estilo nómada)
         // Paredes laterales de lana roja a Y=1 y Y=2
         for (int z = 0; z < 5; z++) {
-            entries.add(new BlueprintEntry(0, 1, z, Blocks.RED_WOOL.defaultBlockState(), false, false));
-            entries.add(new BlueprintEntry(4, 1, z, Blocks.RED_WOOL.defaultBlockState(), false, false));
+            entries.add(new BlueprintEntry(0, 1, z, Blocks.WOOL.red().defaultBlockState(), false, false));
+            entries.add(new BlueprintEntry(4, 1, z, Blocks.WOOL.red().defaultBlockState(), false, false));
 
-            entries.add(new BlueprintEntry(1, 2, z, Blocks.YELLOW_WOOL.defaultBlockState(), false, false));
-            entries.add(new BlueprintEntry(3, 2, z, Blocks.YELLOW_WOOL.defaultBlockState(), false, false));
+            entries.add(new BlueprintEntry(1, 2, z, Blocks.WOOL.yellow().defaultBlockState(), false, false));
+            entries.add(new BlueprintEntry(3, 2, z, Blocks.WOOL.yellow().defaultBlockState(), false, false));
 
             // Techo de la tienda a Y=3
-            entries.add(new BlueprintEntry(2, 3, z, Blocks.WHITE_WOOL.defaultBlockState(), false, false));
+            entries.add(new BlueprintEntry(2, 3, z, Blocks.WOOL.white().defaultBlockState(), false, false));
         }
 
         // Pared trasera de lana (z = 4)
-        entries.add(new BlueprintEntry(1, 1, 4, Blocks.RED_WOOL.defaultBlockState(), false, false));
-        entries.add(new BlueprintEntry(2, 1, 4, Blocks.RED_WOOL.defaultBlockState(), false, false));
-        entries.add(new BlueprintEntry(3, 1, 4, Blocks.RED_WOOL.defaultBlockState(), false, false));
-        entries.add(new BlueprintEntry(2, 2, 4, Blocks.YELLOW_WOOL.defaultBlockState(), false, false));
+        entries.add(new BlueprintEntry(1, 1, 4, Blocks.WOOL.red().defaultBlockState(), false, false));
+        entries.add(new BlueprintEntry(2, 1, 4, Blocks.WOOL.red().defaultBlockState(), false, false));
+        entries.add(new BlueprintEntry(3, 1, 4, Blocks.WOOL.red().defaultBlockState(), false, false));
+        entries.add(new BlueprintEntry(2, 2, 4, Blocks.WOOL.yellow().defaultBlockState(), false, false));
 
         // Columnas frontales de valla de roble (z = 0)
         entries.add(new BlueprintEntry(1, 1, 0, Blocks.OAK_FENCE.defaultBlockState(), false, false));
         entries.add(new BlueprintEntry(3, 1, 0, Blocks.OAK_FENCE.defaultBlockState(), false, false));
 
         // Cama dentro de la tienda (x=2, z=2 pie y z=3 cabecera)
-        entries.add(new BlueprintEntry(2, 1, 2, Blocks.RED_BED.defaultBlockState()
+        entries.add(new BlueprintEntry(2, 1, 2, Blocks.BED.red().defaultBlockState()
                 .setValue(BedBlock.FACING, Direction.NORTH)
                 .setValue(BedBlock.PART, BedPart.FOOT), true, false));
-        entries.add(new BlueprintEntry(2, 1, 3, Blocks.RED_BED.defaultBlockState()
+        entries.add(new BlueprintEntry(2, 1, 3, Blocks.BED.red().defaultBlockState()
                 .setValue(BedBlock.FACING, Direction.NORTH)
                 .setValue(BedBlock.PART, BedPart.HEAD), true, false));
 
