@@ -13,7 +13,8 @@ public enum KoboldRole {
     BUILDER,
     ALCHEMIST,
     SCOUT,
-    MINER;
+    MINER,
+    SORCERESS;
 
     public KoboldGirlEntity.KoboldProfession toProfession() {
         return KoboldGirlEntity.KoboldProfession.valueOf(this.name());

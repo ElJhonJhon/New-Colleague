@@ -309,7 +309,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         BUILDER("Constructora"),
         ALCHEMIST("Alquimista"),
         SCOUT("Exploradora"),
-        MINER("Minera");
+        MINER("Minera"),
+        SORCERESS("Hechicera");
 
         private final String displayName;
 
@@ -1448,6 +1449,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public boolean isMagicUser() {
         return this.isAnyQueen() || this.getProfession() == KoboldProfession.SORCERESS;
+    }
+
+    public boolean isSorceress() {
+        return this.getProfession() == KoboldProfession.SORCERESS;
     }
 
     public static String getPlayerPrimaryTribe(Player player) {
