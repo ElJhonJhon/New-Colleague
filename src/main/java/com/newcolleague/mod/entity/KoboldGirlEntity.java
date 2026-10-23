@@ -28,6 +28,9 @@ import com.newcolleague.mod.network.OpenQueenDialoguePayload;
 import com.newcolleague.mod.village.VillageTier;
 import com.newcolleague.mod.village.VillageProject;
 import com.newcolleague.mod.village.StructureBlueprint;
+import com.newcolleague.mod.village.QueenRoleManager;
+import com.newcolleague.mod.village.VillageStorage;
+import com.newcolleague.mod.entity.ai.KoboldCraftItemGoal;
 import net.minecraft.tags.BlockTags;
 import net.neoforged.neoforge.network.PacketDistributor;
 import net.minecraft.world.item.HoeItem;
@@ -295,7 +298,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         GUARD("Guardia"),
         VIGILANT("Vigilante"),
         HUNTER("Cazadora"),
-        BUILDER("Constructora");
+        BUILDER("Constructora"),
+        ALCHEMIST("Alquimista"),
+        SCOUT("Exploradora"),
+        MINER("Minera");
 
         private final String displayName;
 
@@ -336,6 +342,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         TERRAIN,
         BUILDING,
         MINERALS,
+        MEDICAL,
         MISC
     }
 
@@ -1267,8 +1274,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             this.addProsperity(bonus);
         }
 
-        // 2. Comprobar inicio o avance de proyectos de expansión cada 200 ticks (~10s)
+        // 2. Comprobar inicio o avance de proyectos de expansión y reasignación dinámica de roles cada 200 ticks (~10s)
         if (this.tickCount % 200 == 0) {
+            this.evaluateAndReassignTribeRoles();
+
             if (this.activeVillageProject == null) {
                 VillageTier tier = this.getVillageTier();
                 StructureBlueprint.StructureType nextType = null;
@@ -1299,6 +1308,49 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 this.onStructureCompleted(this.activeVillageProject);
             }
         }
+    }
+
+    public boolean hasActiveVillageProject() {
+        return this.activeVillageProject != null && !this.activeVillageProject.isCompleted();
+    }
+
+    public void evaluateAndReassignTribeRoles() {
+        if (!this.isAnyQueen() || !(this.level() instanceof ServerLevel sl)) return;
+
+        List<KoboldGirlEntity> tribe = sl.getEntitiesOfClass(
+                KoboldGirlEntity.class,
+                this.getBoundingBox().inflate(64.0D),
+                k -> k.isAlive() && Objects.equals(k.getTribeName(), this.getTribeName())
+        );
+        if (tribe.isEmpty()) return;
+
+        QueenRoleManager.evaluateAndAssignRoles(this, tribe);
+    }
+
+    public int countCommunityFood(ServerLevel level, int radius) {
+        int food = 0;
+        List<BlockPos> chests = findNearbyUniqueChests(level, this.blockPosition(), radius, 6);
+        for (BlockPos chestPos : chests) {
+            Container c = getChestContainer(level, chestPos);
+            if (c != null) {
+                for (int i = 0; i < c.getContainerSize(); i++) {
+                    ItemStack stack = c.getItem(i);
+                    if (stack.has(DataComponents.FOOD) || stack.is(Items.WHEAT)) {
+                        food += stack.getCount();
+                    }
+                }
+            }
+        }
+        return food;
+    }
+
+    public boolean hasNearbyHostiles(ServerLevel level, double radius) {
+        List<LivingEntity> hostiles = level.getEntitiesOfClass(
+                LivingEntity.class,
+                this.getBoundingBox().inflate(radius),
+                e -> e.isAlive() && (e instanceof Monster || e instanceof Enemy)
+        );
+        return !hostiles.isEmpty();
     }
 
     public @Nullable BlockPos getGuardPosition() {
@@ -1353,6 +1405,141 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     public boolean isDefender() {
         KoboldProfession prof = this.getProfession();
         return prof == KoboldProfession.GUARD || prof == KoboldProfession.VIGILANT;
+    }
+
+    public boolean isCivilian() {
+        return this.getProfession() == KoboldProfession.NONE;
+    }
+
+    public boolean isFarmer() {
+        return this.getProfession() == KoboldProfession.FARMER;
+    }
+
+    public boolean isHunter() {
+        return this.getProfession() == KoboldProfession.HUNTER;
+    }
+
+    public boolean isBuilder() {
+        return this.getProfession() == KoboldProfession.BUILDER;
+    }
+
+    public boolean isAlchemist() {
+        return this.getProfession() == KoboldProfession.ALCHEMIST;
+    }
+
+    public boolean isScout() {
+        return this.getProfession() == KoboldProfession.SCOUT;
+    }
+
+    public boolean isMiner() {
+        return this.getProfession() == KoboldProfession.MINER;
+    }
+
+    public boolean isLogger() {
+        return this.isBuilder() || this.isCivilian();
+    }
+
+    public boolean isWorkStance() {
+        return this.getCommandStance() == CommandStance.WORK;
+    }
+
+    public void setKoboldRole(KoboldRole role) {
+        this.setProfession(role != null ? role.toProfession() : KoboldProfession.NONE);
+    }
+
+    public KoboldRole getKoboldRole() {
+        return KoboldRole.fromProfession(this.getProfession());
+    }
+
+    public boolean hasAxe() {
+        if (this.getMainHandItem().is(ItemTags.AXES) || this.getOffhandItem().is(ItemTags.AXES)) return true;
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            if (this.inventory.getItem(i).is(ItemTags.AXES)) return true;
+        }
+        return false;
+    }
+
+    public boolean hasShovel() {
+        if (this.getMainHandItem().is(ItemTags.SHOVELS) || this.getOffhandItem().is(ItemTags.SHOVELS)) return true;
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            if (this.inventory.getItem(i).is(ItemTags.SHOVELS)) return true;
+        }
+        return false;
+    }
+
+    public boolean hasHoe() {
+        return this.hasHoeInInventory();
+    }
+
+    public int countItemInInventory(net.minecraft.world.item.Item item) {
+        int count = 0;
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (stack.is(item)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    public int countPlanksInInventory() {
+        int count = 0;
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (stack.is(ItemTags.PLANKS)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    public int countLogsInInventory() {
+        int count = 0;
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (stack.is(ItemTags.LOGS)) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+
+    public boolean consumePlank(int count) {
+        int remaining = count;
+        for (int i = 0; i < this.inventory.getContainerSize() && remaining > 0; i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (stack.is(ItemTags.PLANKS)) {
+                int toShrink = Math.min(stack.getCount(), remaining);
+                stack.shrink(toShrink);
+                remaining -= toShrink;
+            }
+        }
+        return remaining == 0;
+    }
+
+    public boolean consumeLog(int count) {
+        int remaining = count;
+        for (int i = 0; i < this.inventory.getContainerSize() && remaining > 0; i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (stack.is(ItemTags.LOGS)) {
+                int toShrink = Math.min(stack.getCount(), remaining);
+                stack.shrink(toShrink);
+                remaining -= toShrink;
+            }
+        }
+        return remaining == 0;
+    }
+
+    public boolean hasInInventory(net.minecraft.world.item.Item item, int count) {
+        return this.countItemInInventory(item) >= count;
+    }
+
+    public boolean hasInInventory(net.minecraft.world.item.Item item) {
+        return this.hasItemInInventory(item);
+    }
+
+    public boolean consumeItemFromInventory(net.minecraft.world.item.Item item, int count) {
+        return this.consumeItem(item, count);
     }
 
     public boolean isPatrolSquadLeader() {
@@ -1655,14 +1842,24 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     }
 
     public @Nullable KoboldGirlEntity getTribeQueen() {
-        if (!this.hasTribe()) return null;
         String myTribe = this.getTribeName();
+        UUID myOwner = this.getOwnerUUID();
         List<KoboldGirlEntity> queens = this.level().getEntitiesOfClass(
                 KoboldGirlEntity.class,
                 this.getBoundingBox().inflate(128.0D),
-                k -> k.isAnyQueen() && k.isAlive() && myTribe.equals(k.getTribeName())
+                k -> k != this && k.isAnyQueen() && k.isAlive() && (
+                        (!myTribe.isEmpty() && myTribe.equals(k.getTribeName()))
+                        || (myOwner != null && myOwner.equals(k.getOwnerUUID()))
+                )
         );
-        return queens.isEmpty() ? null : queens.get(0);
+        if (!queens.isEmpty()) {
+            KoboldGirlEntity q = queens.get(0);
+            if (myTribe.isEmpty() && !q.getTribeName().isEmpty()) {
+                this.setTribeName(q.getTribeName());
+            }
+            return q;
+        }
+        return null;
     }
 
     public @Nullable KoboldGirlEntity getTribeQueen(ServerLevel level) {
@@ -2349,6 +2546,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         // 4. Combate táctico adaptable según el arma equipada (Mazo, Lanza, Arco, Espada/Hacha)
         this.goalSelector.addGoal(4, new KoboldAdaptiveCombatGoal(this));
 
+        // 4. Auto-Crafteo de Emergencia: Fabricar o reponer herramientas rotas en mesa comunal o in-situ
+        this.goalSelector.addGoal(4, new KoboldCraftItemGoal(this, 1.15D));
+
         // 5. Interacción con el Báculo: La Reina (o Reina Sobreviviente) se acerca al jugador portador del Báculo
         this.goalSelector.addGoal(5, new KoboldQueenApproachBaculoGoal(this));
 
@@ -2370,11 +2570,20 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         // 9. Cosechar activamente cultivos 100% maduros y sembrar tierra arada (Exclusivo Granjeras)
         this.goalSelector.addGoal(9, new HarvestCropGoal(this, 1.15D));
 
+        // 9. Ganadería y reproducción autónoma de fauna con baja población (<= 2 ejemplares)
+        this.goalSelector.addGoal(9, new KoboldHerdingGoal(this, 1.15D));
+
         // 10. Aplanar terreno, nivelar y construir estructuras tribales (Constructoras y súbditas en trabajo)
         this.goalSelector.addGoal(10, new KoboldVillageBuildGoal(this, 1.15D));
 
         // 10. Cocinar carne cruda en fogatas (Exclusivo Cazadoras)
         this.goalSelector.addGoal(10, new KoboldCookMeatAtCampfireGoal(this, 1.15D));
+
+        // 10. Exploración e inteligencia táctica (Exclusivo Exploradoras)
+        this.goalSelector.addGoal(10, new KoboldScoutGoal(this, 1.2D));
+
+        // 10. Minería subterránea en escuadrón e iluminación (Exclusivo Mineras)
+        this.goalSelector.addGoal(10, new KoboldMiningSquadGoal(this, 1.15D));
 
         // 11. Usar cofres para almacenar excedentes (bloques, semillas, comida) y reabastecerse de comida
         this.goalSelector.addGoal(11, new KoboldChestGoal(this));
@@ -2666,9 +2875,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             this.clearFire();
         }
 
-        // Hornear pan y auto-equipar armaduras (solo en slots de armadura) periódicamente cada 1 segundo
+        // Hornear pan, alquimia y auto-equipar armaduras periódicamente cada 1 segundo
         if (this.tickCount % 20 == 0) {
             this.tryCraftBread();
+            this.tryCraftAlchemySupplies();
             this.autoEquipArmor();
         }
     }
@@ -3776,6 +3986,25 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         return level.getBlockState(pos).is(Blocks.DIRT_PATH) || level.getBlockState(pos.below()).is(Blocks.DIRT_PATH);
     }
 
+    public boolean isStepSafe(BlockPos nextPos) {
+        if (isNearHazard(this.level(), nextPos, 1)) {
+            return false;
+        }
+        if (isNearDangerousDrop(this.level(), nextPos, 1)) {
+            return false;
+        }
+        if (this.level().isAir(nextPos)) {
+            for (int i = 1; i <= 3; i++) {
+                BlockPos below = nextPos.below(i);
+                BlockState state = this.level().getBlockState(below);
+                if (state.is(Blocks.LAVA) || (i == 3 && this.level().isAir(below))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     public BlockPos findMorningWalkDestination() {
         if (this.assignedBedPos == null) {
             return null;
@@ -3825,9 +4054,12 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             this.addExhaustion(0.015F);
         }
 
-        // Si tiene hambre y no está durmiendo, intentar comer de su inventario cada 30 ticks (1.5 segundos)
-        if (!this.isSleeping() && this.needsFood() && this.hungerTickTimer % 30 == 0) {
-            this.tryEatFromInventory();
+        // Si tiene hambre o salud crítica, consumir alimento o raciones de emergencia
+        if (!this.isSleeping() && this.hungerTickTimer % 30 == 0) {
+            this.tryEmergencyHeal();
+            if (this.needsFood()) {
+                this.tryEatFromInventory();
+            }
         }
 
         // Regeneración gradual de salud ("poco a poco") similar a la del jugador
@@ -3893,8 +4125,38 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             ItemStack stack = this.inventory.getItem(i);
             FoodProperties food = stack.get(DataComponents.FOOD);
             if (food != null) {
+                // Raciones de élite (Manzanas doradas, zanahorias doradas):
+                // Reservadas exclusivamente para salud crítica (<= 30%), duelos o guerra/combate
+                if (stack.is(Items.GOLDEN_APPLE) || stack.is(Items.ENCHANTED_GOLDEN_APPLE) || stack.is(Items.GOLDEN_CARROT)) {
+                    boolean isCritical = (this.getHealth() / this.getMaxHealth()) <= 0.30F;
+                    boolean inDuelOrWar = this.isInPlayerDuel() || this.isInQueenDuel() || this.getTarget() != null || this.isInPowerStruggle();
+                    if (!isCritical && !inDuelOrWar) {
+                        continue;
+                    }
+                }
                 this.eat(stack, food);
                 return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean tryEmergencyHeal() {
+        if (this.isSleeping() || !this.isAlive()) {
+            return false;
+        }
+        boolean isCritical = (this.getHealth() / this.getMaxHealth()) <= 0.30F;
+        boolean inDuelOrWar = this.isInPlayerDuel() || this.isInQueenDuel() || this.getTarget() != null || this.isInPowerStruggle();
+        if (isCritical || (inDuelOrWar && this.getHealth() < this.getMaxHealth())) {
+            for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+                ItemStack stack = this.inventory.getItem(i);
+                if (stack.is(Items.GOLDEN_APPLE) || stack.is(Items.ENCHANTED_GOLDEN_APPLE) || stack.is(Items.GOLDEN_CARROT)) {
+                    FoodProperties food = stack.get(DataComponents.FOOD);
+                    if (food != null) {
+                        this.eat(stack, food);
+                        return true;
+                    }
+                }
             }
         }
         return false;
@@ -3913,6 +4175,19 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         this.setFoodLevel(newFood);
         this.setSaturationLevel(newSat);
+
+        // Efectos medicinales especiales de raciones de élite
+        if (stack.is(Items.GOLDEN_APPLE)) {
+            this.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 100, 1));
+            this.addEffect(new MobEffectInstance(MobEffects.ABSORPTION, 2400, 0));
+        } else if (stack.is(Items.ENCHANTED_GOLDEN_APPLE)) {
+            this.addEffect(new MobEffectInstance(MobEffects.REGENERATION, 400, 1));
+            this.addEffect(new MobEffectInstance(MobEffects.RESISTANCE, 6000, 0));
+            this.addEffect(new MobEffectInstance(MobEffects.FIRE_RESISTANCE, 6000, 0));
+            this.addEffect(new MobEffectInstance(MobEffects.ABSORPTION, 2400, 3));
+        } else if (stack.is(Items.GOLDEN_CARROT)) {
+            this.heal(6.0F);
+        }
 
         // Efectos de comer (sonido y partículas)
         this.playSound(SoundEvents.GENERIC_EAT.value(), 0.7F, 1.0F + (this.random.nextFloat() - this.random.nextFloat()) * 0.2F);
@@ -3976,6 +4251,79 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
             if (this.needsFood()) {
                 this.tryEatFromInventory();
+            }
+        }
+    }
+
+    public void tryCraftAlchemySupplies() {
+        if (this.isSleeping() || (this.isSubdita() && this.getProfession() != KoboldProfession.ALCHEMIST)) {
+            return;
+        }
+
+        int totalGoldIngots = 0;
+        int totalGoldNuggets = 0;
+        int totalApples = 0;
+        int totalCarrots = 0;
+
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (stack.is(Items.GOLD_INGOT)) totalGoldIngots += stack.getCount();
+            else if (stack.is(Items.GOLD_NUGGET)) totalGoldNuggets += stack.getCount();
+            else if (stack.is(Items.APPLE)) totalApples += stack.getCount();
+            else if (stack.is(Items.CARROT)) totalCarrots += stack.getCount();
+        }
+
+        // Si tiene lingotes pero pocas pepitas y tiene zanahorias, convertir 1 lingote en 9 pepitas
+        if (totalGoldIngots > 0 && totalGoldNuggets < 8 && totalCarrots > 0) {
+            shrinkItemInInventory(Items.GOLD_INGOT, 1);
+            totalGoldIngots--;
+            ItemStack nuggets = new ItemStack(Items.GOLD_NUGGET, 9);
+            ItemStack leftover = this.inventory.addItem(nuggets);
+            if (!leftover.isEmpty() && this.level() instanceof ServerLevel sl) {
+                this.spawnAtLocation(sl, leftover);
+            }
+            totalGoldNuggets += 9;
+        }
+
+        // A. Craftear Manzana Dorada (8 lingotes de oro + 1 manzana)
+        if (totalGoldIngots >= 8 && totalApples >= 1) {
+            shrinkItemInInventory(Items.GOLD_INGOT, 8);
+            shrinkItemInInventory(Items.APPLE, 1);
+            ItemStack goldenApple = new ItemStack(Items.GOLDEN_APPLE, 1);
+            ItemStack leftover = this.inventory.addItem(goldenApple);
+            if (!leftover.isEmpty() && this.level() instanceof ServerLevel sl) {
+                this.spawnAtLocation(sl, leftover);
+            }
+            this.playSound(SoundEvents.BREWING_STAND_BREW, 0.9F, 1.2F);
+            if (this.level() instanceof ServerLevel sl) {
+                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+            }
+        }
+
+        // B. Craftear Zanahoria Dorada (8 pepitas de oro + 1 zanahoria)
+        if (totalGoldNuggets >= 8 && totalCarrots >= 1) {
+            shrinkItemInInventory(Items.GOLD_NUGGET, 8);
+            shrinkItemInInventory(Items.CARROT, 1);
+            ItemStack goldenCarrot = new ItemStack(Items.GOLDEN_CARROT, 1);
+            ItemStack leftover = this.inventory.addItem(goldenCarrot);
+            if (!leftover.isEmpty() && this.level() instanceof ServerLevel sl) {
+                this.spawnAtLocation(sl, leftover);
+            }
+            this.playSound(SoundEvents.BREWING_STAND_BREW, 0.9F, 1.2F);
+            if (this.level() instanceof ServerLevel sl) {
+                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+            }
+        }
+    }
+
+    public void shrinkItemInInventory(net.minecraft.world.item.Item item, int count) {
+        int remaining = count;
+        for (int i = 0; i < this.inventory.getContainerSize() && remaining > 0; i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (stack.is(item)) {
+                int toShrink = Math.min(stack.getCount(), remaining);
+                stack.shrink(toShrink);
+                remaining -= toShrink;
             }
         }
     }
@@ -4138,6 +4486,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             case BUILDING -> {
                 return getCategoryForItem(stack) != ChestCategory.BUILDING;
             }
+            case MEDICAL -> {
+                return getCategoryForItem(stack) != ChestCategory.MEDICAL;
+            }
             default -> {
                 return false;
             }
@@ -4270,6 +4621,13 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     public static ChestCategory getCategoryForItem(ItemStack stack) {
         if (stack.isEmpty()) return ChestCategory.MISC;
 
+        // 0. SUMINISTROS MÉDICOS Y ALQUIMIA
+        if (stack.is(Items.GOLDEN_APPLE) || stack.is(Items.ENCHANTED_GOLDEN_APPLE)
+                || stack.is(Items.GOLDEN_CARROT) || stack.is(Items.POTION)
+                || stack.is(Items.SPLASH_POTION) || stack.is(Items.LINGERING_POTION)) {
+            return ChestCategory.MEDICAL;
+        }
+
         // 1. COMIDA
         if (stack.has(DataComponents.FOOD) || stack.is(Items.WHEAT)) {
             return ChestCategory.FOOD;
@@ -4322,6 +4680,19 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             ItemStack stack = this.inventory.getItem(i);
             if (getCategoryForItem(stack) == ChestCategory.MINERALS) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean hasMedicalItemsToStore() {
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (getCategoryForItem(stack) == ChestCategory.MEDICAL) {
+                int toKeep = (stack.is(Items.GOLDEN_APPLE) || stack.is(Items.ENCHANTED_GOLDEN_APPLE)) ? 1 : 2;
+                if (stack.getCount() > toKeep) {
+                    return true;
+                }
             }
         }
         return false;
@@ -4628,7 +4999,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         // 4. ALMACENAR EXCEDENTES (Almacenamiento estricto por categoría)
         ChestCategory storeCategory = null;
-        if (this.hasExcessFoodToStore()) {
+        if (this.hasMedicalItemsToStore()) {
+            storeCategory = ChestCategory.MEDICAL;
+        } else if (this.hasExcessFoodToStore()) {
             storeCategory = ChestCategory.FOOD;
         } else if (this.hasSurplusSeeds()) {
             storeCategory = ChestCategory.SEEDS;
@@ -4861,6 +5234,22 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                             }
                         } else {
                             ItemStack storeStack = inv.removeItem(i, stack.getCount());
+                            ItemStack leftover = addItemToContainer(chest, storeStack);
+                            if (!leftover.isEmpty()) {
+                                inv.addItem(leftover);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            case MEDICAL -> {
+                for (int i = 0; i < inv.getContainerSize(); i++) {
+                    ItemStack stack = inv.getItem(i);
+                    if (getCategoryForItem(stack) == ChestCategory.MEDICAL) {
+                        int toKeep = (stack.is(Items.GOLDEN_APPLE) || stack.is(Items.ENCHANTED_GOLDEN_APPLE)) ? 1 : 2;
+                        if (stack.getCount() > toKeep) {
+                            ItemStack storeStack = inv.removeItem(i, stack.getCount() - toKeep);
                             ItemStack leftover = addItemToContainer(chest, storeStack);
                             if (!leftover.isEmpty()) {
                                 inv.addItem(leftover);
@@ -6245,7 +6634,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eVigilante§a de la tribu."));
                 }
                 return InteractionResult.SUCCESS;
-            } else if ((itemInHand.is(ItemTags.PICKAXES) || itemInHand.is(ItemTags.SHOVELS)) && this.getProfession() != KoboldProfession.BUILDER) {
+            } else if (itemInHand.is(ItemTags.SHOVELS) && this.getProfession() != KoboldProfession.BUILDER) {
                 if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
                     this.setProfession(KoboldProfession.BUILDER);
                     ItemStack toStore = itemInHand.copy();
@@ -6260,6 +6649,57 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     }
                     String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
                     serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eConstructora§a de la tribu. Aplanará el terreno y construirá estructuras."));
+                }
+                return InteractionResult.SUCCESS;
+            } else if (itemInHand.is(ItemTags.PICKAXES) && this.getProfession() != KoboldProfession.MINER) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    this.setProfession(KoboldProfession.MINER);
+                    ItemStack toStore = itemInHand.copy();
+                    toStore.setCount(1);
+                    this.inventory.addItem(toStore);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.STONE_BREAK, 1.0F, 1.0F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                    }
+                    String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
+                    serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eMinera§a de la tribu. Extraerá recursos y minerales de las profundidades."));
+                }
+                return InteractionResult.SUCCESS;
+            } else if ((itemInHand.is(Items.BREWING_STAND) || itemInHand.is(Items.GLASS_BOTTLE) || itemInHand.is(Items.GOLDEN_CARROT) || itemInHand.is(Items.GLISTERING_MELON_SLICE)) && this.getProfession() != KoboldProfession.ALCHEMIST) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    this.setProfession(KoboldProfession.ALCHEMIST);
+                    ItemStack toStore = itemInHand.copy();
+                    toStore.setCount(1);
+                    this.inventory.addItem(toStore);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.BREWING_STAND_BREW, 1.0F, 1.0F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                    }
+                    String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
+                    serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eAlquimista§a de la tribu. Elaborará raciones doradas y medicinas para la tribu."));
+                }
+                return InteractionResult.SUCCESS;
+            } else if ((itemInHand.is(Items.COMPASS) || itemInHand.is(Items.RECOVERY_COMPASS) || itemInHand.is(Items.MAP) || itemInHand.is(Items.FILLED_MAP)) && this.getProfession() != KoboldProfession.SCOUT) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    this.setProfession(KoboldProfession.SCOUT);
+                    ItemStack toStore = itemInHand.copy();
+                    toStore.setCount(1);
+                    this.inventory.addItem(toStore);
+                    if (!player.getAbilities().instabuild) {
+                        itemInHand.shrink(1);
+                    }
+                    this.playSound(SoundEvents.SPYGLASS_USE, 1.0F, 1.0F);
+                    if (this.level() instanceof ServerLevel sl) {
+                        sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.2D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                    }
+                    String name = this.getCustomGivenName().isEmpty() ? "Esta súbdita" : this.getCustomGivenName();
+                    serverPlayer.sendSystemMessage(Component.literal("§a" + name + " ahora es §eExploradora§a de la tribu. Rastreará territorio y reportará a la Reina."));
                 }
                 return InteractionResult.SUCCESS;
             }
@@ -6833,54 +7273,88 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         List<KoboldGirlEntity> subditas = level.getEntitiesOfClass(
                 KoboldGirlEntity.class,
                 this.getBoundingBox().inflate(128.0D),
-                k -> !k.isAnyQueen() && k.isAlive() && (tribeName.isEmpty() || k.getTribeName().equals(tribeName))
+                k -> !k.isAnyQueen() && k.isAlive() && (tribeName.isEmpty() || k.getTribeName().isEmpty() || k.getTribeName().equals(tribeName))
         );
 
         if (!subditas.isEmpty()) {
-            List<KoboldGirlEntity> shuffled = new ArrayList<>(subditas);
-            Collections.shuffle(shuffled, new java.util.Random(level.getRandom().nextLong()));
+            List<KoboldGirlEntity> rebelCandidates = new ArrayList<>();
+            List<KoboldGirlEntity> loyalWorkers = new ArrayList<>();
+            for (KoboldGirlEntity subdita : subditas) {
+                // Sincronizar nombre de tribu si estaba vacío
+                if (subdita.getTribeName().isEmpty() && !tribeName.isEmpty()) {
+                    subdita.setTribeName(tribeName);
+                }
+                // Constructoras y Granjeras son trabajadoras civiles pacíficas y NUNCA se rebelan
+                if (subdita.getProfession() == KoboldProfession.BUILDER || subdita.getProfession() == KoboldProfession.FARMER) {
+                    loyalWorkers.add(subdita);
+                } else {
+                    rebelCandidates.add(subdita);
+                }
+            }
 
-            int total = shuffled.size();
-            int numRebels;
-            if (total <= 2) {
-                numRebels = level.getRandom().nextFloat() < 0.25F ? 1 : 0;
-            } else if (total <= 4) {
-                numRebels = 1;
-            } else {
-                numRebels = Math.max(1, (int) Math.round(total * 0.20D));
+            // Procesar trabajadoras civiles: siempre leales y en postura WORK
+            for (KoboldGirlEntity worker : loyalWorkers) {
+                worker.setRebel(false);
+                worker.setOwnerUUID(player.getUUID());
+                worker.setTarget(null);
+                worker.setLastHurtByMob(null);
+                worker.unequipHands();
+                worker.setCommandStance(CommandStance.WORK);
+                worker.updateRulerCustomName();
+
+                level.sendParticles(ParticleTypes.HAPPY_VILLAGER, worker.getX(), worker.getY() + 1.2D, worker.getZ(), 16, 0.4D, 0.4D, 0.4D, 0.05D);
+                level.sendParticles(ParticleTypes.HEART, worker.getX(), worker.getY() + 1.2D, worker.getZ(), 6, 0.3D, 0.3D, 0.3D, 0.05D);
+                level.playSound(null, worker.getX(), worker.getY(), worker.getZ(), SoundEvents.VILLAGER_YES, SoundSource.NEUTRAL, 0.9F, 1.1F);
             }
 
             int actualRebels = 0;
-            for (int i = 0; i < total; i++) {
-                KoboldGirlEntity subdita = shuffled.get(i);
-                if (i < numRebels) {
-                    // Rebelde: se opone al nuevo gobernante pero no ataca de inmediato; se aleja
-                    subdita.setRebel(true);
-                    subdita.setOwnerUUID(null);
-                    subdita.setTarget(null);
-                    subdita.unequipHands();
-                    subdita.setCustomName(Component.literal(subdita.getProfession().getDisplayName() + " Rebelde").withStyle(ChatFormatting.RED));
-                    subdita.setCustomNameVisible(true);
-                    actualRebels++;
+            if (!rebelCandidates.isEmpty()) {
+                List<KoboldGirlEntity> shuffled = new ArrayList<>(rebelCandidates);
+                Collections.shuffle(shuffled, new java.util.Random(level.getRandom().nextLong()));
 
-                    level.sendParticles(ParticleTypes.ANGRY_VILLAGER, subdita.getX(), subdita.getY() + 1.2D, subdita.getZ(), 14, 0.4D, 0.4D, 0.4D, 0.05D);
-                    level.playSound(null, subdita.getX(), subdita.getY(), subdita.getZ(), SoundEvents.VILLAGER_NO, SoundSource.NEUTRAL, 1.0F, 0.9F);
+                int totalCandidates = shuffled.size();
+                int numRebels;
+                if (totalCandidates <= 2) {
+                    numRebels = level.getRandom().nextFloat() < 0.25F ? 1 : 0;
+                } else if (totalCandidates <= 4) {
+                    numRebels = 1;
                 } else {
-                    // Aliada leal: ahora es propiedad del jugador
-                    subdita.setRebel(false);
-                    subdita.setOwnerUUID(player.getUUID());
-                    subdita.setTarget(null);
-                    subdita.unequipHands();
-                    subdita.updateRulerCustomName();
+                    numRebels = Math.max(1, (int) Math.round(totalCandidates * 0.20D));
+                }
 
-                    level.sendParticles(ParticleTypes.HAPPY_VILLAGER, subdita.getX(), subdita.getY() + 1.2D, subdita.getZ(), 16, 0.4D, 0.4D, 0.4D, 0.05D);
-                    level.sendParticles(ParticleTypes.HEART, subdita.getX(), subdita.getY() + 1.2D, subdita.getZ(), 6, 0.3D, 0.3D, 0.3D, 0.05D);
-                    level.playSound(null, subdita.getX(), subdita.getY(), subdita.getZ(), SoundEvents.VILLAGER_YES, SoundSource.NEUTRAL, 0.9F, 1.1F);
+                for (int i = 0; i < totalCandidates; i++) {
+                    KoboldGirlEntity subdita = shuffled.get(i);
+                    if (i < numRebels) {
+                        // Rebelde: se opone al nuevo gobernante pero no ataca de inmediato; se aleja
+                        subdita.setRebel(true);
+                        subdita.setOwnerUUID(null);
+                        subdita.setTarget(null);
+                        subdita.setLastHurtByMob(null);
+                        subdita.unequipHands();
+                        subdita.setCustomName(Component.literal(subdita.getProfession().getDisplayName() + " Rebelde").withStyle(ChatFormatting.RED));
+                        subdita.setCustomNameVisible(true);
+                        actualRebels++;
+
+                        level.sendParticles(ParticleTypes.ANGRY_VILLAGER, subdita.getX(), subdita.getY() + 1.2D, subdita.getZ(), 14, 0.4D, 0.4D, 0.4D, 0.05D);
+                        level.playSound(null, subdita.getX(), subdita.getY(), subdita.getZ(), SoundEvents.VILLAGER_NO, SoundSource.NEUTRAL, 1.0F, 0.9F);
+                    } else {
+                        // Aliada leal: ahora es propiedad del jugador
+                        subdita.setRebel(false);
+                        subdita.setOwnerUUID(player.getUUID());
+                        subdita.setTarget(null);
+                        subdita.setLastHurtByMob(null);
+                        subdita.unequipHands();
+                        subdita.updateRulerCustomName();
+
+                        level.sendParticles(ParticleTypes.HAPPY_VILLAGER, subdita.getX(), subdita.getY() + 1.2D, subdita.getZ(), 16, 0.4D, 0.4D, 0.4D, 0.05D);
+                        level.sendParticles(ParticleTypes.HEART, subdita.getX(), subdita.getY() + 1.2D, subdita.getZ(), 6, 0.3D, 0.3D, 0.3D, 0.05D);
+                        level.playSound(null, subdita.getX(), subdita.getY(), subdita.getZ(), SoundEvents.VILLAGER_YES, SoundSource.NEUTRAL, 0.9F, 1.1F);
+                    }
                 }
             }
 
             if (actualRebels > 0) {
-                player.sendSystemMessage(Component.literal("⚠ ¡" + actualRebels + " kobold(s) se niegan a someterse y se han rebelado contra ti!")
+                player.sendSystemMessage(Component.literal("⚠ ¡" + actualRebels + " combatiente(s) kobold se niegan a someterse y se han rebelado contra ti!")
                         .withStyle(ChatFormatting.RED, ChatFormatting.ITALIC));
             } else {
                 player.sendSystemMessage(Component.literal("✨ Todas las súbditas de la tribu han jurado lealtad ante ti.")
@@ -8625,7 +9099,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         @Override
         public boolean canUse() {
-            if (this.kobold.isSleeping() || this.kobold.isThreatened() || this.kobold.isInQueenDuel() || this.kobold.isInPlayerDuel()) {
+            if (this.kobold.isSleeping() || this.kobold.isThreatened() || this.kobold.isInQueenDuel() || this.kobold.isInPlayerDuel() || this.kobold.isSpectatingDuel()) {
                 return false;
             }
             if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
@@ -8704,6 +9178,26 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             }
 
             // 2. Fase de Construcción de Bloques del Blueprint
+            // Fast-forward si los bloques del blueprint ya están colocados físicamente en el mundo
+            while (!project.isCompleted()) {
+                StructureBlueprint.BlueprintEntry current = project.getCurrentEntry();
+                if (current == null) break;
+                BlockPos checkPos = project.getWorldPosForEntry(current);
+                if (level.getBlockState(checkPos).equals(current.state())) {
+                    project.advanceBuild();
+                } else {
+                    break;
+                }
+            }
+
+            if (project.isCompleted()) {
+                KoboldGirlEntity queen = this.kobold.isAnyQueen() ? this.kobold : this.kobold.getTribeQueen();
+                if (queen != null) {
+                    queen.onStructureCompleted(project);
+                }
+                return false;
+            }
+
             StructureBlueprint.BlueprintEntry entry = project.getCurrentEntry();
             if (entry != null) {
                 BlockPos worldPos = project.getWorldPosForEntry(entry);
@@ -8849,11 +9343,21 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             }
 
             // 2. Acercamiento al objetivo
-            double distSq = this.kobold.distanceToSqr(Vec3.atCenterOf(this.targetPos));
+            double dx = this.kobold.getX() - (this.targetPos.getX() + 0.5D);
+            double dz = this.kobold.getZ() - (this.targetPos.getZ() + 0.5D);
+            double dy = this.kobold.getY() - (this.targetPos.getY() + 0.5D);
+            double horizontalDistSq = dx * dx + dz * dz;
+            double distSq = horizontalDistSq + dy * dy;
             this.kobold.getLookControl().setLookAt(this.targetPos.getX() + 0.5D, this.targetPos.getY() + 0.5D, this.targetPos.getZ() + 0.5D, 30.0F, 30.0F);
 
-            double reachDist = (this.currentPhase == BuildPhase.FETCHING_FROM_CHEST) ? 6.25D : 12.25D;
-            if (distSq > reachDist) {
+            boolean withinReach;
+            if (this.currentPhase == BuildPhase.FETCHING_FROM_CHEST) {
+                withinReach = distSq <= 9.0D;
+            } else {
+                withinReach = (horizontalDistSq <= 12.25D && Math.abs(dy) <= 5.0D) || distSq <= 20.25D;
+            }
+
+            if (!withinReach) {
                 if (this.kobold.getNavigation().isDone() || this.kobold.tickCount % 20 == 0) {
                     this.kobold.getNavigation().moveTo(this.targetPos.getX() + 0.5D, this.targetPos.getY(), this.targetPos.getZ() + 0.5D, this.speedModifier);
                 }
@@ -8895,6 +9399,14 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                             if (state.is(BlockTags.LOGS)) {
                                 this.kobold.getInventory().addItem(new ItemStack(Items.OAK_LOG));
                                 this.kobold.playSound(SoundEvents.WOOD_BREAK, 1.0F, 1.0F);
+
+                                // Silvicultura Sostenible: replantar brote inmediatamente si el tocón tocaba tierra o césped
+                                BlockPos belowPos = this.gatherTarget.below();
+                                BlockState belowState = sl.getBlockState(belowPos);
+                                if (belowState.is(Blocks.DIRT) || belowState.is(Blocks.GRASS_BLOCK) || belowState.is(Blocks.COARSE_DIRT) || belowState.is(Blocks.PODZOL)) {
+                                    sl.setBlock(this.gatherTarget, Blocks.OAK_SAPLING.defaultBlockState(), 3);
+                                    this.kobold.playSound(SoundEvents.GRASS_PLACE, 1.0F, 1.0F);
+                                }
                             } else if (state.is(Blocks.STONE) || state.is(Blocks.ANDESITE) || state.is(Blocks.DIORITE) || state.is(Blocks.GRANITE) || state.is(Blocks.COBBLESTONE)) {
                                 this.kobold.getInventory().addItem(new ItemStack(Items.COBBLESTONE));
                                 this.kobold.playSound(SoundEvents.STONE_BREAK, 1.0F, 1.0F);
@@ -9153,6 +9665,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
 
         private @Nullable BlockPos findNearbyTreeLog(Level level, BlockPos center, int radius) {
+            // Regla de Silvicultura Sostenible: no talar si quedan <= 3 árboles en el perímetro de la aldea
+            if (countNearbyAdultTrees(level, center, 32) <= 3) {
+                return null;
+            }
+
             BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
             BlockPos closest = null;
             double closestDist = Double.MAX_VALUE;
@@ -9173,6 +9690,24 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 }
             }
             return closest;
+        }
+
+        private int countNearbyAdultTrees(Level level, BlockPos center, int radius) {
+            BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+            int trees = 0;
+            for (int dx = -radius; dx <= radius; dx += 4) {
+                for (int dz = -radius; dz <= radius; dz += 4) {
+                    int checkX = center.getX() + dx;
+                    int checkZ = center.getZ() + dz;
+                    int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, checkX, checkZ);
+                    mpos.set(checkX, y - 1, checkZ);
+                    if (level.getBlockState(mpos).is(BlockTags.LOGS)) {
+                        trees++;
+                        if (trees > 4) return trees;
+                    }
+                }
+            }
+            return trees;
         }
 
         private @Nullable BlockPos findNearbyStone(Level level, BlockPos center, int radius) {
@@ -9497,6 +10032,17 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 if (animal.isBaby()) return false;
                 if (mob.distanceToSqr(target) > 256.0D) return false;
                 if (!mob.hasLineOfSight(target)) return false;
+
+                // Regla DO_NOT_KILL: proteger si quedan <= 2 ejemplares de la especie en el perímetro
+                List<? extends Animal> localSpecies = level.getEntitiesOfClass(
+                        animal.getClass(),
+                        animal.getBoundingBox().inflate(16.0D),
+                        a -> a.isAlive() && !a.isBaby()
+                );
+                if (localSpecies.size() <= 2) {
+                    return false;
+                }
+
                 return isFoodAnimal(target);
             });
             this.kobold = mob;
@@ -9564,6 +10110,488 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         public void stop() {
             super.stop();
             this.kobold.unequipHands(); // Desequipar manos al terminar la caza
+        }
+    }
+
+    // Ganadería autónoma: alimentar y reproducir especies con baja población (<= 2)
+    public static class KoboldHerdingGoal extends Goal {
+        private final KoboldGirlEntity kobold;
+        private final double speedModifier;
+        private Animal targetAnimal;
+        private int feedCooldown = 0;
+
+        public KoboldHerdingGoal(KoboldGirlEntity kobold, double speedModifier) {
+            this.kobold = kobold;
+            this.speedModifier = speedModifier;
+            this.setFlags(java.util.EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+        }
+
+        @Override
+        public boolean canUse() {
+            if (this.kobold.isSleeping() || this.kobold.isInPowerStruggle()) return false;
+            if (this.kobold.getTarget() != null) return false;
+            if (this.feedCooldown > 0) {
+                this.feedCooldown--;
+                return false;
+            }
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
+                return false;
+            }
+            if (!this.kobold.isMorningWorkTime()) {
+                return false;
+            }
+
+            List<Animal> nearbyAnimals = this.kobold.level().getEntitiesOfClass(
+                    Animal.class,
+                    this.kobold.getBoundingBox().inflate(14.0D),
+                    a -> a.isAlive() && !a.isBaby() && !a.isInLove() && a.getAge() == 0 && canBreedAnimal(this.kobold, a)
+            );
+            if (nearbyAnimals.isEmpty()) return false;
+
+            for (Animal a : nearbyAnimals) {
+                List<? extends Animal> localSpecies = this.kobold.level().getEntitiesOfClass(
+                        a.getClass(),
+                        a.getBoundingBox().inflate(16.0D),
+                        la -> la.isAlive() && !la.isBaby()
+                );
+                if (localSpecies.size() <= 2) {
+                    this.targetAnimal = a;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        @Override
+        public void start() {
+            if (this.targetAnimal != null) {
+                this.kobold.getNavigation().moveTo(this.targetAnimal, this.speedModifier);
+            }
+        }
+
+        @Override
+        public boolean canContinueToUse() {
+            return this.targetAnimal != null && this.targetAnimal.isAlive() && !this.targetAnimal.isInLove() && this.kobold.distanceToSqr(this.targetAnimal) < 196.0D;
+        }
+
+        @Override
+        public void tick() {
+            if (this.targetAnimal == null) return;
+            this.kobold.getLookControl().setLookAt(this.targetAnimal, 30.0F, 30.0F);
+            double distSqr = this.kobold.distanceToSqr(this.targetAnimal);
+            if (distSqr <= 5.0D) {
+                tryFeedAnimal(this.kobold, this.targetAnimal);
+                this.feedCooldown = 80;
+                this.targetAnimal = null;
+                this.kobold.getNavigation().stop();
+            } else if (this.kobold.getNavigation().isDone()) {
+                this.kobold.getNavigation().moveTo(this.targetAnimal, this.speedModifier);
+            }
+        }
+
+        @Override
+        public void stop() {
+            this.targetAnimal = null;
+        }
+    }
+
+    public boolean hasItemInInventory(net.minecraft.world.item.Item item) {
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (stack.is(item)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean canBreedAnimal(KoboldGirlEntity kobold, Animal animal) {
+        if (animal instanceof Cow || animal instanceof Sheep) {
+            return kobold.getWheatCount() > 0;
+        } else if (animal instanceof Pig) {
+            return kobold.hasItemInInventory(Items.CARROT) || kobold.hasItemInInventory(Items.POTATO) || kobold.hasItemInInventory(Items.BEETROOT);
+        } else if (animal instanceof Chicken) {
+            return kobold.hasPureSeedsInInventory();
+        } else if (animal instanceof Rabbit) {
+            return kobold.hasItemInInventory(Items.CARROT) || kobold.hasItemInInventory(Items.GOLDEN_CARROT) || kobold.hasItemInInventory(Items.DANDELION);
+        }
+        return false;
+    }
+
+    public static boolean tryFeedAnimal(KoboldGirlEntity kobold, Animal animal) {
+        net.minecraft.world.item.Item feedItem = null;
+        if (animal instanceof Cow || animal instanceof Sheep) {
+            if (kobold.getWheatCount() > 0) feedItem = Items.WHEAT;
+        } else if (animal instanceof Pig) {
+            if (kobold.hasItemInInventory(Items.CARROT)) feedItem = Items.CARROT;
+            else if (kobold.hasItemInInventory(Items.POTATO)) feedItem = Items.POTATO;
+            else if (kobold.hasItemInInventory(Items.BEETROOT)) feedItem = Items.BEETROOT;
+        } else if (animal instanceof Chicken) {
+            if (kobold.hasItemInInventory(Items.WHEAT_SEEDS)) feedItem = Items.WHEAT_SEEDS;
+            else if (kobold.hasItemInInventory(Items.BEETROOT_SEEDS)) feedItem = Items.BEETROOT_SEEDS;
+        } else if (animal instanceof Rabbit) {
+            if (kobold.hasItemInInventory(Items.CARROT)) feedItem = Items.CARROT;
+            else if (kobold.hasItemInInventory(Items.GOLDEN_CARROT)) feedItem = Items.GOLDEN_CARROT;
+        }
+
+        if (feedItem != null) {
+            kobold.shrinkItemInInventory(feedItem, 1);
+            animal.setInLove(null);
+            kobold.playSound(SoundEvents.GENERIC_EAT.value(), 0.8F, 1.2F);
+            if (kobold.level() instanceof ServerLevel sl) {
+                sl.sendParticles(ParticleTypes.HEART, animal.getX(), animal.getY() + 0.8D, animal.getZ(), 6, 0.3D, 0.3D, 0.3D, 0.05D);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    public boolean consumeItem(net.minecraft.world.item.Item item, int count) {
+        if (!this.hasItemInInventory(item)) return false;
+        this.shrinkItemInInventory(item, count);
+        return true;
+    }
+
+    public boolean hasPickaxe() {
+        for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+            ItemStack stack = this.inventory.getItem(i);
+            if (stack.is(ItemTags.PICKAXES)) {
+                return true;
+            }
+        }
+        return this.getMainHandItem().is(ItemTags.PICKAXES) || this.getOffhandItem().is(ItemTags.PICKAXES);
+    }
+
+    public void damagePickaxe(int amount) {
+        if (this.level() instanceof ServerLevel sl) {
+            for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+                ItemStack stack = this.inventory.getItem(i);
+                if (stack.is(ItemTags.PICKAXES)) {
+                    stack.hurtAndBreak(amount, sl, null, item -> {});
+                    return;
+                }
+            }
+        }
+    }
+
+    // Meta: Exploración e Inteligencia táctica (Mapeo de POIs, sigilo ante hostiles y reporte presencial a la Reina)
+    public static class KoboldScoutGoal extends Goal {
+        private final KoboldGirlEntity kobold;
+        private final double speedModifier;
+        private final java.util.Set<BlockPos> discoveredPOIs = new java.util.HashSet<>();
+        private int scanCooldown = 0;
+        private boolean hasReportedTonight = false;
+        private BlockPos currentExploreTarget = null;
+        private int exploreTargetTicks = 0;
+
+        public KoboldScoutGoal(KoboldGirlEntity kobold, double speedModifier) {
+            this.kobold = kobold;
+            this.speedModifier = speedModifier;
+            this.setFlags(java.util.EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+        }
+
+        @Override
+        public boolean canUse() {
+            if (this.kobold.isSleeping() || this.kobold.isInPowerStruggle()) return false;
+            if (this.kobold.getProfession() != KoboldProfession.SCOUT) return false;
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) return false;
+            return true;
+        }
+
+        @Override
+        public void start() {
+            this.hasReportedTonight = false;
+            this.exploreTargetTicks = 0;
+            this.currentExploreTarget = null;
+        }
+
+        @Override
+        public void stop() {
+            this.kobold.setShiftKeyDown(false);
+            this.currentExploreTarget = null;
+        }
+
+        @Override
+        public void tick() {
+            Level level = this.kobold.level();
+            boolean isNight = level.isNight();
+
+            // 1. Sigilo y evasión (SNEAK_AND_EVADE) si hay monstruos o amenazas hostiles cerca (16 bloques)
+            List<LivingEntity> threats = level.getEntitiesOfClass(
+                    LivingEntity.class,
+                    this.kobold.getBoundingBox().inflate(16.0D),
+                    e -> e.isAlive() && (e instanceof Monster || e instanceof Enemy) && this.kobold.hasLineOfSight(e)
+            );
+            if (!threats.isEmpty()) {
+                this.kobold.setShiftKeyDown(true);
+                LivingEntity nearest = threats.get(0);
+                Vec3 awayVec = this.kobold.position().subtract(nearest.position()).normalize().scale(8.0D);
+                BlockPos awayPos = BlockPos.containing(this.kobold.position().add(awayVec));
+                if (this.kobold.getNavigation().isDone() && this.kobold.isStepSafe(awayPos)) {
+                    this.kobold.getNavigation().moveTo(awayPos.getX() + 0.5D, awayPos.getY(), awayPos.getZ() + 0.5D, this.speedModifier * 0.8D);
+                }
+                return;
+            } else {
+                this.kobold.setShiftKeyDown(false);
+            }
+
+            // 2. Al atardecer o noche: Regresar a reportar presencialmente a la Reina de la tribu
+            if (isNight) {
+                KoboldGirlEntity queen = this.kobold.getTribeQueen();
+                if (queen != null && queen.isAlive()) {
+                    double distToQueen = this.kobold.distanceToSqr(queen);
+                    if (distToQueen > 9.0D) {
+                        this.kobold.getNavigation().moveTo(queen, this.speedModifier);
+                    } else {
+                        this.kobold.getNavigation().stop();
+                        this.kobold.getLookControl().setLookAt(queen, 30.0F, 30.0F);
+                        if (!this.hasReportedTonight) {
+                            this.hasReportedTonight = true;
+                            this.deliverReportToQueen(queen);
+                        }
+                    }
+                    return;
+                }
+            } else {
+                this.hasReportedTonight = false;
+            }
+
+            // 3. Mapeo de POIs cada 40 ticks
+            if (this.scanCooldown <= 0) {
+                this.scanCooldown = 40;
+                this.scanNearbyPOIs(level);
+            } else {
+                this.scanCooldown--;
+            }
+
+            // 4. Exploración y patrullaje de radio extendido durante el día
+            this.exploreTargetTicks++;
+            if (this.currentExploreTarget == null || this.exploreTargetTicks > 200 || this.kobold.getNavigation().isDone()) {
+                this.exploreTargetTicks = 0;
+                this.pickNextExplorationTarget(level);
+            }
+        }
+
+        private void scanNearbyPOIs(Level level) {
+            BlockPos current = this.kobold.blockPosition();
+            BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+
+            for (int dx = -12; dx <= 12; dx += 3) {
+                for (int dy = -4; dy <= 4; dy += 2) {
+                    for (int dz = -12; dz <= 12; dz += 3) {
+                        mpos.set(current.getX() + dx, current.getY() + dy, current.getZ() + dz);
+                        BlockState state = level.getBlockState(mpos);
+
+                        if (state.is(Blocks.IRON_ORE) || state.is(Blocks.DEEPSLATE_IRON_ORE)
+                                || state.is(Blocks.GOLD_ORE) || state.is(Blocks.DEEPSLATE_GOLD_ORE)
+                                || state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE)) {
+                            BlockPos imm = mpos.immutable();
+                            if (this.discoveredPOIs.add(imm)) {
+                                this.kobold.playSound(SoundEvents.SPYGLASS_USE, 0.6F, 1.4F);
+                            }
+                        }
+
+                        if (state.is(BlockTags.BEDS)) {
+                            this.discoveredPOIs.add(mpos.immutable());
+                        }
+                    }
+                }
+            }
+
+            List<KoboldGirlEntity> rivalQueens = level.getEntitiesOfClass(
+                    KoboldGirlEntity.class,
+                    this.kobold.getBoundingBox().inflate(24.0D),
+                    q -> q.isAlive() && q.isAnyQueen() && !q.getTribeName().equals(this.kobold.getTribeName())
+            );
+            for (KoboldGirlEntity rq : rivalQueens) {
+                this.discoveredPOIs.add(rq.blockPosition());
+            }
+        }
+
+        private void pickNextExplorationTarget(Level level) {
+            RandomSource rand = this.kobold.getRandom();
+            double angle = rand.nextDouble() * 2.0D * Math.PI;
+            double dist = 24.0D + rand.nextDouble() * 24.0D;
+            int tx = this.kobold.getBlockX() + (int)(Math.cos(angle) * dist);
+            int tz = this.kobold.getBlockZ() + (int)(Math.sin(angle) * dist);
+            int ty = level.getHeight(Heightmap.Types.WORLD_SURFACE, tx, tz);
+
+            BlockPos target = new BlockPos(tx, ty, tz);
+            if (this.kobold.isStepSafe(target)) {
+                this.currentExploreTarget = target;
+                this.kobold.getNavigation().moveTo(tx + 0.5D, ty, tz + 0.5D, this.speedModifier);
+            }
+        }
+
+        private void deliverReportToQueen(KoboldGirlEntity queen) {
+            this.kobold.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.2F);
+            queen.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.0F);
+            if (this.kobold.level() instanceof ServerLevel sl) {
+                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.kobold.getX(), this.kobold.getY() + 1.2D, this.kobold.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, queen.getX(), queen.getY() + 1.2D, queen.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+            }
+            if (!this.discoveredPOIs.isEmpty()) {
+                this.discoveredPOIs.clear();
+                this.kobold.addProsperity(5);
+            }
+        }
+    }
+
+    // Meta: Minería sustantiva con consumo de durabilidad de picos, antorchas automáticas en luz < 7 y escoltas
+    public static class KoboldMiningSquadGoal extends Goal {
+        private final KoboldGirlEntity kobold;
+        private final double speedModifier;
+        private BlockPos currentOreTarget = null;
+        private int mineTicks = 0;
+        private int torchCooldown = 0;
+
+        public KoboldMiningSquadGoal(KoboldGirlEntity kobold, double speedModifier) {
+            this.kobold = kobold;
+            this.speedModifier = speedModifier;
+            this.setFlags(java.util.EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+        }
+
+        @Override
+        public boolean canUse() {
+            if (this.kobold.isSleeping() || this.kobold.isInPowerStruggle()) return false;
+            if (this.kobold.getProfession() != KoboldProfession.MINER) return false;
+            if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) return false;
+            if (!this.kobold.hasPickaxe()) return false;
+
+            this.currentOreTarget = this.findNearbyMineableBlock(this.kobold.level(), this.kobold.blockPosition(), 16);
+            return this.currentOreTarget != null;
+        }
+
+        @Override
+        public void start() {
+            this.mineTicks = 0;
+            if (this.currentOreTarget != null) {
+                this.kobold.getNavigation().moveTo(this.currentOreTarget.getX() + 0.5D, this.currentOreTarget.getY(), this.currentOreTarget.getZ() + 0.5D, this.speedModifier);
+                this.summonGuardEscort();
+            }
+        }
+
+        @Override
+        public boolean canContinueToUse() {
+            return this.currentOreTarget != null && !this.kobold.level().getBlockState(this.currentOreTarget).isAir() && this.kobold.hasPickaxe();
+        }
+
+        @Override
+        public void tick() {
+            if (this.currentOreTarget == null) return;
+            Level level = this.kobold.level();
+
+            // Iluminación automática de cavernas: colocar antorcha si la luz es < 7
+            if (this.torchCooldown <= 0) {
+                BlockPos standPos = this.kobold.blockPosition();
+                if (level.getMaxLocalRawBrightness(standPos) < 7 && level.getBlockState(standPos).isAir()) {
+                    if (this.kobold.consumeItem(Items.TORCH, 1) || !this.kobold.isOwned()) {
+                        level.setBlock(standPos, Blocks.TORCH.defaultBlockState(), 3);
+                        this.kobold.playSound(SoundEvents.WOOD_PLACE, 1.0F, 1.0F);
+                        this.torchCooldown = 60;
+                    }
+                }
+            } else {
+                this.torchCooldown--;
+            }
+
+            this.kobold.getLookControl().setLookAt(this.currentOreTarget.getX() + 0.5D, this.currentOreTarget.getY() + 0.5D, this.currentOreTarget.getZ() + 0.5D, 30.0F, 30.0F);
+            double distSqr = this.kobold.distanceToSqr(this.currentOreTarget.getX() + 0.5D, this.currentOreTarget.getY() + 0.5D, this.currentOreTarget.getZ() + 0.5D);
+
+            if (distSqr <= 9.0D) {
+                this.kobold.getNavigation().stop();
+                this.mineTicks++;
+                if (this.mineTicks % 4 == 0) {
+                    this.kobold.playSound(SoundEvents.STONE_HIT, 0.7F, 1.0F);
+                }
+                if (this.mineTicks >= 30) {
+                    this.mineTicks = 0;
+                    this.mineTargetBlock(level, this.currentOreTarget);
+                    this.currentOreTarget = null;
+                }
+            } else if (this.kobold.getNavigation().isDone()) {
+                this.kobold.getNavigation().moveTo(this.currentOreTarget.getX() + 0.5D, this.currentOreTarget.getY(), this.currentOreTarget.getZ() + 0.5D, this.speedModifier);
+            }
+        }
+
+        private void mineTargetBlock(Level level, BlockPos pos) {
+            BlockState state = level.getBlockState(pos);
+            if (state.isAir()) return;
+
+            if (level instanceof ServerLevel sl) {
+                sl.levelEvent(2001, pos, Block.getId(state));
+                sl.destroyBlock(pos, false);
+
+                ItemStack drop;
+                if (state.is(Blocks.COAL_ORE) || state.is(Blocks.DEEPSLATE_COAL_ORE)) {
+                    drop = new ItemStack(Items.COAL);
+                } else if (state.is(Blocks.IRON_ORE) || state.is(Blocks.DEEPSLATE_IRON_ORE)) {
+                    drop = new ItemStack(Items.RAW_IRON);
+                } else if (state.is(Blocks.COPPER_ORE) || state.is(Blocks.DEEPSLATE_COPPER_ORE)) {
+                    drop = new ItemStack(Items.RAW_COPPER);
+                } else if (state.is(Blocks.GOLD_ORE) || state.is(Blocks.DEEPSLATE_GOLD_ORE)) {
+                    drop = new ItemStack(Items.RAW_GOLD);
+                } else if (state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE)) {
+                    drop = new ItemStack(Items.DIAMOND);
+                } else {
+                    drop = new ItemStack(Items.COBBLESTONE);
+                }
+
+                ItemStack leftover = this.kobold.getInventory().addItem(drop);
+                if (!leftover.isEmpty()) {
+                    this.kobold.spawnAtLocation(sl, leftover);
+                }
+
+                this.kobold.damagePickaxe(1);
+                this.kobold.playSound(SoundEvents.STONE_BREAK, 1.0F, 1.0F);
+                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.kobold.getX(), this.kobold.getY() + 1.2D, this.kobold.getZ(), 4, 0.2D, 0.2D, 0.2D, 0.05D);
+            }
+        }
+
+        private void summonGuardEscort() {
+            List<KoboldGirlEntity> guards = this.kobold.level().getEntitiesOfClass(
+                    KoboldGirlEntity.class,
+                    this.kobold.getBoundingBox().inflate(24.0D),
+                    k -> k != this.kobold && k.isAlive() && (k.getProfession() == KoboldProfession.GUARD || k.getProfession() == KoboldProfession.VIGILANT) && k.getTarget() == null
+            );
+            int recruited = 0;
+            for (KoboldGirlEntity guard : guards) {
+                if (recruited >= 2) break;
+                guard.getNavigation().moveTo(this.kobold, 1.15D);
+                recruited++;
+            }
+        }
+
+        private @Nullable BlockPos findNearbyMineableBlock(Level level, BlockPos center, int radius) {
+            BlockPos.MutableBlockPos mpos = new BlockPos.MutableBlockPos();
+            BlockPos bestPos = null;
+            double bestDist = Double.MAX_VALUE;
+
+            for (int dy = -6; dy <= 4; dy++) {
+                for (int dx = -radius; dx <= radius; dx += 2) {
+                    for (int dz = -radius; dz <= radius; dz += 2) {
+                        mpos.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+                        BlockState state = level.getBlockState(mpos);
+                        if (isMineableOreOrStone(state)) {
+                            double d = center.distSqr(mpos);
+                            if (d < bestDist) {
+                                bestDist = d;
+                                bestPos = mpos.immutable();
+                            }
+                        }
+                    }
+                }
+            }
+            return bestPos;
+        }
+
+        private boolean isMineableOreOrStone(BlockState state) {
+            return state.is(Blocks.COAL_ORE) || state.is(Blocks.DEEPSLATE_COAL_ORE)
+                    || state.is(Blocks.IRON_ORE) || state.is(Blocks.DEEPSLATE_IRON_ORE)
+                    || state.is(Blocks.COPPER_ORE) || state.is(Blocks.DEEPSLATE_COPPER_ORE)
+                    || state.is(Blocks.GOLD_ORE) || state.is(Blocks.DEEPSLATE_GOLD_ORE)
+                    || state.is(Blocks.DIAMOND_ORE) || state.is(Blocks.DEEPSLATE_DIAMOND_ORE)
+                    || state.is(Blocks.STONE) || state.is(Blocks.DEEPSLATE);
         }
     }
 
@@ -10219,6 +11247,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         public void stop() {
             this.mob.setSpectatingDuel(false);
             this.currentDuel = null;
+            if (this.mob.getTarget() != null && !this.mob.isDefender()) {
+                this.mob.setTarget(null);
+            }
+            this.mob.setLastHurtByMob(null);
             this.mob.getNavigation().stop();
         }
 
@@ -10226,6 +11258,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         public void tick() {
             if (this.currentDuel == null || !this.currentDuel.isActive()) {
                 this.mob.setSpectatingDuel(false);
+                if (this.mob.getTarget() != null && !this.mob.isDefender()) {
+                    this.mob.setTarget(null);
+                }
+                this.mob.setLastHurtByMob(null);
                 return;
             }
             this.mob.setSpectatingDuel(true);
@@ -10569,12 +11605,20 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                         && koboldOther.getTribeName().equals(k.getTribeName())) {
                     return;
                 }
-                // No alertar si está durmiendo, en duelo de reinas o en guerra por el poder
-                if (koboldOther.isSleeping() || koboldOther.isInQueenDuel() || koboldOther.isInPowerStruggle()) {
+                // Si la víctima o la reina está en un duelo formal (de reinas o con el jugador), NO alertar a las demás
+                if (this.kobold.isInQueenDuel() || this.kobold.isInPlayerDuel()
+                        || (hurtByMob instanceof Player p && this.kobold.isInPlayerDuelWith(p))) {
                     return;
                 }
-                // Granjeras y Cazadoras son pacíficas y solo se defienden cuando son atacadas directamente
-                if (koboldOther.getProfession() == KoboldProfession.FARMER || koboldOther.getProfession() == KoboldProfession.HUNTER) {
+                // No alertar si la compañera está durmiendo, en duelo, espectando un duelo o en guerra por el poder
+                if (koboldOther.isSleeping() || koboldOther.isInQueenDuel() || koboldOther.isInPlayerDuel()
+                        || koboldOther.isSpectatingDuel() || koboldOther.isInPowerStruggle()) {
+                    return;
+                }
+                // Granjeras, Cazadoras y Constructoras son trabajadoras civiles pacíficas y no se alertan para pelear
+                if (koboldOther.getProfession() == KoboldProfession.FARMER 
+                        || koboldOther.getProfession() == KoboldProfession.HUNTER
+                        || koboldOther.getProfession() == KoboldProfession.BUILDER) {
                     return;
                 }
                 // Solo alertar a compañeras de la misma tribu
