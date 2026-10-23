@@ -3,6 +3,9 @@
 Mod de entidad viva animada con **GeckoLib** para Minecraft NeoForge 26.2 y 26.3.
 Entidad: **Kobold Girl** (`kobold_girl`).
 
+> 📄 **Documentación Completa del Estado del Proyecto:**  
+> Consulta el archivo **[ESTADO_DEL_PROYECTO.md](file:///e:/desvcargas/Nueva%20carpeta%20(3)/ESTADO_DEL_PROYECTO.md)** para ver la arquitectura completa, jerarquía tribal, sistema de construcción autónomo, duelos de dominancia y registro de cambios técnicos.
+
 ---
 
 ## 📁 Dónde exportar desde Blockbench

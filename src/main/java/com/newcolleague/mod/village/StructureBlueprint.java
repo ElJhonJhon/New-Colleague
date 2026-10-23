@@ -81,6 +81,7 @@ public class StructureBlueprint {
             case STOREHOUSE -> buildStorehouse(entries);
             case WATCHTOWER -> buildWatchtower(entries);
         }
+        entries.sort(java.util.Comparator.comparingInt(BlueprintEntry::relY));
         return entries;
     }
 
@@ -115,17 +116,17 @@ public class StructureBlueprint {
         for (int x = 0; x < 5; x++) {
             for (int z = 0; z < 5; z++) {
                 if (x == 2 && z == 2) {
-                    // Fogata en el centro
-                    entries.add(new BlueprintEntry(x, 1, z, Blocks.CAMPFIRE.defaultBlockState().setValue(CampfireBlock.LIT, true), false, false));
+                    // Fogata en el centro sobre adoquín
                     entries.add(new BlueprintEntry(x, 0, z, Blocks.COBBLESTONE.defaultBlockState(), false, false));
+                    entries.add(new BlueprintEntry(x, 1, z, Blocks.CAMPFIRE.defaultBlockState().setValue(CampfireBlock.LIT, true), false, false));
                 } else if ((x == 1 || x == 3) && z == 2) {
-                    // Troncos para sentarse horizontalmente (X axis)
+                    // Troncos para sentarse horizontalmente (X axis) sobre camino
+                    entries.add(new BlueprintEntry(x, 0, z, Blocks.DIRT_PATH.defaultBlockState(), false, false));
                     entries.add(new BlueprintEntry(x, 1, z, Blocks.OAK_LOG.defaultBlockState().setValue(RotatedPillarBlock.AXIS, Direction.Axis.X), false, false));
-                    entries.add(new BlueprintEntry(x, 0, z, Blocks.DIRT_PATH.defaultBlockState(), false, false));
                 } else if (x == 2 && (z == 1 || z == 3)) {
-                    // Troncos para sentarse horizontalmente (Z axis)
-                    entries.add(new BlueprintEntry(x, 1, z, Blocks.OAK_LOG.defaultBlockState().setValue(RotatedPillarBlock.AXIS, Direction.Axis.Z), false, false));
+                    // Troncos para sentarse horizontalmente (Z axis) sobre camino
                     entries.add(new BlueprintEntry(x, 0, z, Blocks.DIRT_PATH.defaultBlockState(), false, false));
+                    entries.add(new BlueprintEntry(x, 1, z, Blocks.OAK_LOG.defaultBlockState().setValue(RotatedPillarBlock.AXIS, Direction.Axis.Z), false, false));
                 } else {
                     entries.add(new BlueprintEntry(x, 0, z, Blocks.DIRT_PATH.defaultBlockState(), false, false));
                 }
