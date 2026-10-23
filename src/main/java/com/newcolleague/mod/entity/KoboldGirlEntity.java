@@ -3300,6 +3300,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         return (int) dayTime;
     }
 
+    public boolean isNightTime() {
+        int t = this.getTimeOfDay();
+        return t >= 13000 && t <= 23000;
+    }
+
     /** 7:00 AM a 1:00 PM (Ticks 1000 a 7000): Granjeras cosechan/cultivan y Cazadoras cazan */
     public boolean isMorningWorkTime() {
         int t = this.getTimeOfDay();
@@ -4322,11 +4327,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (isNearDangerousDrop(this.level(), nextPos, 1)) {
             return false;
         }
-        if (this.level().isAir(nextPos)) {
+        if (this.level().getBlockState(nextPos).isAir()) {
             for (int i = 1; i <= 3; i++) {
                 BlockPos below = nextPos.below(i);
                 BlockState state = this.level().getBlockState(below);
-                if (state.is(Blocks.LAVA) || (i == 3 && this.level().isAir(below))) {
+                if (state.is(Blocks.LAVA) || (i == 3 && state.isAir())) {
                     return false;
                 }
             }
@@ -10692,7 +10697,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         @Override
         public void tick() {
             Level level = this.kobold.level();
-            boolean isNight = level.isNight();
+            boolean isNight = this.kobold.isNightTime();
 
             // 1. Sigilo y evasión (SNEAK_AND_EVADE) si hay monstruos o amenazas hostiles cerca (16 bloques)
             List<LivingEntity> threats = level.getEntitiesOfClass(

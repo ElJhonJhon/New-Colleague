@@ -20,7 +20,7 @@ public class QueenRoleManager {
 
         int foodCount = storage.getTotalFood();
         boolean hasActiveProject = storage.hasActiveProject();
-        boolean isNightOrThreatened = sl.isNight() || queen.hasNearbyHostiles(sl, 32.0D);
+        boolean isNightOrThreatened = queen.isNightTime() || queen.hasNearbyHostiles(sl, 32.0D);
 
         int builderCount = 0;
         int farmerCount = 0;

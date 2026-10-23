@@ -325,7 +325,12 @@ public class KoboldCraftItemGoal extends Goal {
                 ItemStack extracted = c.removeItem(i, take);
                 ItemStack leftover = this.kobold.getInventory().addItem(extracted);
                 if (!leftover.isEmpty()) {
-                    c.addItem(leftover);
+                    ItemStack current = c.getItem(i);
+                    if (current.isEmpty()) {
+                        c.setItem(i, leftover);
+                    } else {
+                        current.grow(leftover.getCount());
+                    }
                 }
                 cobbleNeeded -= (take - leftover.getCount());
             }
@@ -335,7 +340,12 @@ public class KoboldCraftItemGoal extends Goal {
                 ItemStack extracted = c.removeItem(i, take);
                 ItemStack leftover = this.kobold.getInventory().addItem(extracted);
                 if (!leftover.isEmpty()) {
-                    c.addItem(leftover);
+                    ItemStack current = c.getItem(i);
+                    if (current.isEmpty()) {
+                        c.setItem(i, leftover);
+                    } else {
+                        current.grow(leftover.getCount());
+                    }
                 }
                 sticksNeeded -= (take - leftover.getCount());
             }
