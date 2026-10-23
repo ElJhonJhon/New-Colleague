@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "C": "minecraft:cobblestone",
+    "E": "minecraft:ender_pearl",
+    "G": "minecraft:gold_ingot",
+    "L": "minecraft:lapis_lazuli",
+    "S": "minecraft:stick"
+  },
+  "pattern": [
+    " GC",
+    "ESG",
+    "GL "
+  ],
+  "result": {
+    "count": 1,
+    "id": "newcolleaguemod:baculo"
+  }
+}

@@ -73,6 +73,54 @@ public class BaculoItem extends Item implements GeoItem {
         return BaculoTier.byLevel(getStaffLevel(stack));
     }
 
+    public static boolean hasQueenSoul(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
+        if (customData != null) {
+            CompoundTag tag = customData.copyTag();
+            return tag.getBoolean("HasQueenSoul").orElse(false);
+        }
+        return false;
+    }
+
+    public static String getQueenSoulName(ItemStack stack) {
+        if (stack.isEmpty()) return "";
+        CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
+        if (customData != null) {
+            CompoundTag tag = customData.copyTag();
+            return tag.getString("QueenSoulName").orElse("");
+        }
+        return "";
+    }
+
+    public static String getQueenSoulTribe(ItemStack stack) {
+        if (stack.isEmpty()) return "";
+        CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
+        if (customData != null) {
+            CompoundTag tag = customData.copyTag();
+            return tag.getString("QueenSoulTribe").orElse("");
+        }
+        return "";
+    }
+
+    public static void setStaffQueenSoul(ItemStack stack, String queenName, String tribeName) {
+        if (stack.isEmpty()) return;
+        CustomData.update(DataComponents.CUSTOM_DATA, stack, tag -> {
+            tag.putBoolean("HasQueenSoul", true);
+            tag.putString("QueenSoulName", queenName != null ? queenName : "");
+            tag.putString("QueenSoulTribe", tribeName != null ? tribeName : "");
+        });
+    }
+
+    public static void clearStaffQueenSoul(ItemStack stack) {
+        if (stack.isEmpty()) return;
+        CustomData.update(DataComponents.CUSTOM_DATA, stack, tag -> {
+            tag.putBoolean("HasQueenSoul", false);
+            tag.putString("QueenSoulName", "");
+            tag.putString("QueenSoulTribe", "");
+        });
+    }
+
     public static boolean upgradePlayerStaff(Player player, int targetLevel) {
         boolean upgraded = false;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
@@ -143,8 +191,17 @@ public class BaculoItem extends Item implements GeoItem {
         } else {
             tooltipOutput.accept(Component.literal("✦ Curación Básica: Regeneración II personal.")
                     .withStyle(ChatFormatting.GRAY));
-            tooltipOutput.accept(Component.literal("  (Derrótala o completa ofrendas para desbloquear el poder tribal)")
+            tooltipOutput.accept(Component.literal("Resuena con un poder digno de respetar por un lider")
                     .withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.ITALIC));
+        }
+
+        if (hasQueenSoul(stack)) {
+            String qName = getQueenSoulName(stack);
+            String tName = getQueenSoulTribe(stack);
+            tooltipOutput.accept(Component.literal("👻 Alma contenida: Reina " + qName + " (" + tName + ")")
+                    .withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
+            tooltipOutput.accept(Component.literal("  [Clic izquierdo en una Kobold de la tribu para reencarnar]")
+                    .withStyle(ChatFormatting.DARK_AQUA, ChatFormatting.ITALIC));
         }
     }
 

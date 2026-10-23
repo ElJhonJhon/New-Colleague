@@ -15,6 +15,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ShieldItem;
 import com.newcolleague.mod.entity.KoboldGirlEntity;
+import com.newcolleague.mod.entity.QueenSoulTracker;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
@@ -169,6 +170,79 @@ public class BaculoEventHandler {
                         false
                 ));
             }
+            return;
+        }
+
+        // Si el objetivo atacado con clic izquierdo es una súbdita ordinaria (no Reina):
+        if (event.getTarget() instanceof KoboldGirlEntity targetKobold && !targetKobold.isAnyQueen()) {
+            if (player.level().isClientSide()) return;
+            if (player instanceof ServerPlayer serverPlayer) {
+                ItemStack staff = player.getMainHandItem();
+                boolean hasSoul = BaculoItem.hasQueenSoul(staff);
+                String soulName = BaculoItem.getQueenSoulName(staff);
+                String soulTribe = BaculoItem.getQueenSoulTribe(staff);
+
+                // Fallback a datos persistentes del jugador
+                if (!hasSoul) {
+                    String pTribe = player.getPersistentData().getString("PendingQueenSoulTribe").orElse("");
+                    String pName = player.getPersistentData().getString("PendingQueenSoulName").orElse("");
+                    if (!pTribe.isEmpty()) {
+                        hasSoul = true;
+                        soulTribe = pTribe;
+                        soulName = pName;
+                    }
+                }
+
+                if (!hasSoul) {
+                    return;
+                }
+
+                // 1. Debe pertenecer al jugador
+                if (!targetKobold.isOwnedBy(serverPlayer)) {
+                    serverPlayer.sendSystemMessage(Component.literal("§cEsta Kobold Girl no pertenece a tu tribu."));
+                    targetKobold.playSound(SoundEvents.VILLAGER_NO, 1.0F, 0.9F);
+                    return;
+                }
+
+                // 2. Debe coincidir con la tribu del alma
+                if (!soulTribe.isEmpty() && !soulTribe.equals(targetKobold.getTribeName())) {
+                    serverPlayer.sendSystemMessage(Component.literal("§cEl alma pertenece a la tribu " + soulTribe + ", pero esta Kobold es de " + targetKobold.getTribeName() + "."));
+                    targetKobold.playSound(SoundEvents.VILLAGER_NO, 1.0F, 0.9F);
+                    return;
+                }
+
+                // 3. Si ya está en proceso de reencarnación
+                if (targetKobold.isReincarnating()) {
+                    serverPlayer.sendSystemMessage(Component.literal("§eEsta Kobold Girl ya se encuentra en proceso de reencarnación."));
+                    return;
+                }
+
+                // 4. Regla: Si una Kobold Girl está en proceso de transformación, no permitir usar el báculo con otra
+                if (serverPlayer.level() instanceof ServerLevel sl) {
+                    final String checkTribe = targetKobold.getTribeName();
+                    List<KoboldGirlEntity> activeReincarnations = sl.getEntitiesOfClass(
+                            KoboldGirlEntity.class,
+                            serverPlayer.getBoundingBox().inflate(96.0D),
+                            k -> k.isAlive() && k.isReincarnating() && checkTribe.equals(k.getTribeName())
+                    );
+                    if (!activeReincarnations.isEmpty()) {
+                        serverPlayer.sendSystemMessage(Component.literal("§c¡Ya hay una Kobold Girl en proceso de reencarnación en esta tribu! Espera a que complete su transformación.")
+                                .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+                        targetKobold.playSound(SoundEvents.VILLAGER_NO, 1.0F, 0.9F);
+                        return;
+                    }
+                }
+
+                // 5. Iniciar la reencarnación
+                BaculoItem.clearStaffQueenSoul(staff);
+                player.getPersistentData().remove("PendingQueenSoulName");
+                player.getPersistentData().remove("PendingQueenSoulTribe");
+
+                targetKobold.startQueenReincarnation(soulName, targetKobold.getTribeName(), serverPlayer);
+
+                serverPlayer.sendSystemMessage(Component.literal("✨ Has iniciado la reencarnación del alma de la reina " + soulName + " en esta Kobold Girl.")
+                        .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+            }
         }
     }
 
@@ -202,6 +276,67 @@ public class BaculoEventHandler {
     public static void onPlayerTick(PlayerTickEvent.Post event) {
         Player player = event.getEntity();
         if (player.level().isClientSide()) return;
+
+        // 0. Gestión de almas de reina flotando hacia el jugador gobernante
+        if (QueenSoulTracker.hasSoul(player.getUUID())) {
+            QueenSoulTracker.ActiveSoul soul = QueenSoulTracker.getSoul(player.getUUID());
+            if (soul != null) {
+                soul.ticksAlive++;
+                Vec3 targetPos = player.position().add(0, 1.2D, 0);
+                Vec3 dir = targetPos.subtract(soul.currentPos);
+                double dist = dir.length();
+
+                double speed = Math.min(0.4D, Math.max(0.12D, dist * 0.08D));
+                if (dist > 0.05D) {
+                    soul.currentPos = soul.currentPos.add(dir.normalize().scale(speed));
+                }
+
+                if (player.level() instanceof ServerLevel sl) {
+                    sl.sendParticles(ParticleTypes.SOUL, soul.currentPos.x, soul.currentPos.y, soul.currentPos.z, 3, 0.1D, 0.1D, 0.1D, 0.02D);
+                    sl.sendParticles(ParticleTypes.SOUL_FIRE_FLAME, soul.currentPos.x, soul.currentPos.y, soul.currentPos.z, 1, 0.05D, 0.05D, 0.05D, 0.01D);
+                    if (soul.ticksAlive % 6 == 0) {
+                        sl.sendParticles(ParticleTypes.SCULK_SOUL, soul.currentPos.x, soul.currentPos.y, soul.currentPos.z, 1, 0.02D, 0.02D, 0.02D, 0.01D);
+                    }
+                    if (soul.ticksAlive % 25 == 0) {
+                        sl.playSound(null, soul.currentPos.x, soul.currentPos.y, soul.currentPos.z, SoundEvents.SOUL_ESCAPE.value(), SoundSource.PLAYERS, 0.5F, 1.3F);
+                    }
+                }
+
+                if (dist < 1.8D) {
+                    ItemStack main = player.getMainHandItem();
+                    ItemStack off = player.getOffhandItem();
+                    boolean holdingBaculo = main.is(ModItems.BACULO.get()) || off.is(ModItems.BACULO.get());
+
+                    if (holdingBaculo) {
+                        ItemStack staff = main.is(ModItems.BACULO.get()) ? main : off;
+                        BaculoItem.setStaffQueenSoul(staff, soul.queenName, soul.tribeName);
+
+                        player.getPersistentData().putString("PendingQueenSoulName", soul.queenName);
+                        player.getPersistentData().putString("PendingQueenSoulTribe", soul.tribeName);
+
+                        QueenSoulTracker.removeSoul(player.getUUID());
+
+                        // Mensaje requerido textualmente por el usuario
+                        player.sendSystemMessage(Component.literal("El alma de la reina " + soul.queenName + " de la tribu " + soul.tribeName + " permanece en tu Báculo a la espera de ser reencarnada")
+                                .withStyle(ChatFormatting.AQUA, ChatFormatting.ITALIC));
+
+                        if (player.level() instanceof ServerLevel sl) {
+                            sl.sendParticles(ParticleTypes.SOUL_FIRE_FLAME, player.getX(), player.getY() + 1.2D, player.getZ(), 25, 0.4D, 0.5D, 0.4D, 0.08D);
+                            sl.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, player.getX(), player.getY() + 1.2D, player.getZ(), 15, 0.3D, 0.4D, 0.3D, 0.1D);
+                            sl.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.BEACON_ACTIVATE, SoundSource.PLAYERS, 0.9F, 1.4F);
+                            sl.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.SOUL_ESCAPE.value(), SoundSource.PLAYERS, 0.8F, 1.0F);
+                        }
+                    } else {
+                        if (soul.ticksAlive % 30 == 0 && player.level() instanceof ServerLevel sl) {
+                            sl.sendParticles(ParticleTypes.SOUL, player.getX(), player.getY() + 1.2D, player.getZ(), 4, 0.3D, 0.3D, 0.3D, 0.02D);
+                        }
+                        if (soul.ticksAlive > 6000) {
+                            QueenSoulTracker.removeSoul(player.getUUID());
+                        }
+                    }
+                }
+            }
+        }
 
         // Sincronizar nivel de báculos sostenidos con el mayor nivel desbloqueado por el jugador
         if (player.tickCount % 20 == 0) {

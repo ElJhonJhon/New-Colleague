@@ -22,5 +22,10 @@ public class ModPayloads {
                 QueenDialogueActionPayload.STREAM_CODEC,
                 QueenDialogueActionPayload::handle
         );
+        registrar.playToServer(
+                RenameKoboldPayload.TYPE,
+                RenameKoboldPayload.STREAM_CODEC,
+                RenameKoboldPayload::handle
+        );
     }
 }

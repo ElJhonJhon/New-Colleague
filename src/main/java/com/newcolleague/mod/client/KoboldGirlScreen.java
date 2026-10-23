@@ -4,6 +4,7 @@ import com.newcolleague.mod.NewColleagueMod;
 import com.newcolleague.mod.entity.KoboldGirlEntity;
 import com.newcolleague.mod.menu.KoboldGirlMenu;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
@@ -26,6 +27,26 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
         this.titleLabelY = 6;
         this.inventoryLabelX = 8;
         this.inventoryLabelY = 138;
+    }
+
+    @Override
+    protected void init() {
+        super.init();
+        KoboldGirlEntity kobold = this.menu.getKoboldGirl();
+        if (kobold != null && this.minecraft != null && this.minecraft.player != null && kobold.isOwnedBy(this.minecraft.player)) {
+            int x = this.leftPos;
+            int y = this.topPos;
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("✎ Renombrar").withStyle(ChatFormatting.YELLOW),
+                    btn -> {
+                        String currentName = kobold.getCustomGivenName();
+                        if (currentName.isEmpty()) {
+                            currentName = kobold.isAnyQueen() ? kobold.getQueenTitle() : kobold.getProfession().getDisplayName();
+                        }
+                        this.minecraft.setScreenAndShow(new RenameKoboldScreen(kobold.getId(), currentName, false));
+                    }
+            ).bounds(x + 102, y + 66, 66, 13).build());
+        }
     }
 
     @Override

@@ -43,7 +43,7 @@ public class QueenDialogueScreen extends Screen {
         int btnHeight = 20;
 
         if (this.stage == Stage.RULER_GOVERNANCE) {
-            int startY = centerY - 70;
+            int startY = centerY - 88;
 
             // 1. Orden General: ¡Todas síganme!
             this.addRenderableWidget(Button.builder(
@@ -117,11 +117,31 @@ public class QueenDialogueScreen extends Screen {
                     }
             ).bounds(centerX - btnWidth / 2, startY + 110, btnWidth, btnHeight).build());
 
-            // 7. Cerrar
+            // 7. Renombrar Tribu y Reina (lado a lado)
+            int halfBtnWidth = (btnWidth - 4) / 2;
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("🏰 Renombrar Tribu").withStyle(ChatFormatting.GOLD),
+                    btn -> {
+                        if (this.minecraft != null) {
+                            this.minecraft.setScreenAndShow(new RenameKoboldScreen(this.queenEntityId, this.tribeName, true));
+                        }
+                    }
+            ).bounds(centerX - btnWidth / 2, startY + 132, halfBtnWidth, btnHeight).build());
+
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("👑 Renombrar Reina").withStyle(ChatFormatting.YELLOW),
+                    btn -> {
+                        if (this.minecraft != null) {
+                            this.minecraft.setScreenAndShow(new RenameKoboldScreen(this.queenEntityId, this.queenTitle, false));
+                        }
+                    }
+            ).bounds(centerX - btnWidth / 2 + halfBtnWidth + 4, startY + 132, halfBtnWidth, btnHeight).build());
+
+            // 8. Cerrar
             this.addRenderableWidget(Button.builder(
                     Component.literal("Cerrar").withStyle(ChatFormatting.GRAY),
                     btn -> this.onClose()
-            ).bounds(centerX - 60, startY + 134, 120, btnHeight).build());
+            ).bounds(centerX - 60, startY + 156, 120, btnHeight).build());
 
         } else if (this.stage == Stage.MAIN_MENU) {
             // Opción 1: "Solo estoy de paso"
@@ -222,9 +242,9 @@ public class QueenDialogueScreen extends Screen {
         int centerX = this.width / 2;
         int centerY = this.height / 2;
         int cardWidth = 280;
-        int cardHeight = this.stage == Stage.RULER_GOVERNANCE ? 230 : 150;
+        int cardHeight = this.stage == Stage.RULER_GOVERNANCE ? 200 : 150;
         int cardLeft = centerX - cardWidth / 2;
-        int cardTop = this.stage == Stage.RULER_GOVERNANCE ? centerY - 110 : centerY - 65;
+        int cardTop = this.stage == Stage.RULER_GOVERNANCE ? centerY - 105 : centerY - 65;
         int cardRight = cardLeft + cardWidth;
         int cardBottom = cardTop + cardHeight;
 
