@@ -124,10 +124,30 @@ public class BaculoEventHandler {
         // Siempre cancelar ataque cuerpo a cuerpo convencional con el báculo
         event.setCanceled(true);
 
-        // Si el objetivo atacado con clic izquierdo es una Reina Kobold:
-        if (event.getTarget() instanceof KoboldGirlEntity queen && queen.isAnyQueen()) {
+        // Si el objetivo atacado con clic izquierdo es una Reina Kobold (o Reina Derrotada a 1 HP):
+        if (event.getTarget() instanceof KoboldGirlEntity queen && (queen.isAnyQueen() || queen.isDownedQueen())) {
             if (player.level().isClientSide()) return;
             if (player instanceof ServerPlayer serverPlayer) {
+                // Caso especial de Reina Derrotada a 1 HP tras duelo:
+                if (queen.isDownedQueen()) {
+                    if (queen.isMarkedForExecution()) {
+                        // Si ya fue sentenciada a muerte, permitir el golpe con el Báculo para rematarla
+                        event.setCanceled(false);
+                        return;
+                    }
+                    // Si aún no ha sido sentenciada, el clic con el Báculo abre el menú de juicio
+                    PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(
+                            queen.getId(),
+                            queen.getQueenTitle(),
+                            queen.getTribeName(),
+                            false,
+                            false,
+                            true,
+                            true
+                    ));
+                    return;
+                }
+
                 // Si la reina está en duelo contra este jugador, no abrir menú
                 if (queen.isInPlayerDuelWith(serverPlayer)) {
                     return;
@@ -140,7 +160,9 @@ public class BaculoEventHandler {
                             queen.getQueenTitle(),
                             queen.getTribeName(),
                             queen.isPacifistRouteChosen(),
-                            true
+                            true,
+                            false,
+                            false
                     ));
                     return;
                 }
@@ -161,12 +183,17 @@ public class BaculoEventHandler {
                     return;
                 }
 
+                // Determinar si el jugador ya gobierna otra tribu
+                boolean playerOwnsAnotherTribe = KoboldGirlEntity.doesPlayerOwnAnyTribe(serverPlayer);
+
                 // Abrir menú de diálogo con la Reina mediante paquete de red
                 PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(
                         queen.getId(),
                         queen.getQueenTitle(),
                         queen.getTribeName(),
                         queen.isPacifistRouteChosen(),
+                        false,
+                        playerOwnsAnotherTribe,
                         false
                 ));
             }

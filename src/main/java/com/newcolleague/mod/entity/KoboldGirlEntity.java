@@ -226,6 +226,14 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     private static final EntityDataAccessor<Boolean> DATA_IS_REINCARNATING =
             SynchedEntityData.defineId(KoboldGirlEntity.class, EntityDataSerializers.BOOLEAN);
 
+    // Estado de Reina Derrotada a 1 HP tras duelo contra jugador gobernante (inmóvil e invulnerable a la espera de juicio)
+    private static final EntityDataAccessor<Boolean> DATA_IS_DOWNED_QUEEN =
+            SynchedEntityData.defineId(KoboldGirlEntity.class, EntityDataSerializers.BOOLEAN);
+
+    // Marca de sentencia a muerte autorizada por el jugador gobernante tras juicio
+    private static final EntityDataAccessor<Boolean> DATA_IS_MARKED_FOR_EXECUTION =
+            SynchedEntityData.defineId(KoboldGirlEntity.class, EntityDataSerializers.BOOLEAN);
+
     // Sistema de Aldea, Expansión, Nivelación de Terreno y Construcción
     private @Nullable VillageProject activeVillageProject = null;
     private int builtStructuresCount = 0;
@@ -295,7 +303,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         GUARD("Guardia"),
         VIGILANT("Vigilante"),
         HUNTER("Cazadora"),
-        BUILDER("Constructora");
+        BUILDER("Constructora"),
+        SORCERESS("Hechicera");
 
         private final String displayName;
 
@@ -341,6 +350,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     // Registro global de cofres categorizados en el servidor (Posición canónica -> Categoría)
     private static final Map<BlockPos, ChestCategory> CLAIMED_CHEST_PURPOSES = new ConcurrentHashMap<>();
+
+    // Control de enfriamiento para el diálogo de advertencia de aura de la reina al aproximarse un jugador gobernante (UUID -> GameTime)
+    private static final Map<UUID, Long> LAST_AURA_GREETING_TICK = new ConcurrentHashMap<>();
 
     // Cama asignada exclusivamente a esta Kobold
     private BlockPos assignedBedPos = null;
@@ -419,6 +431,16 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public void setReprimandedCooldown(int cd) {
         this.reprimandedCooldown = cd;
+    }
+
+    private @Nullable KoboldGirlEntity forcedReprimandTarget = null;
+
+    public @Nullable KoboldGirlEntity getForcedReprimandTarget() {
+        return this.forcedReprimandTarget;
+    }
+
+    public void setForcedReprimandTarget(@Nullable KoboldGirlEntity target) {
+        this.forcedReprimandTarget = target;
     }
 
     public KoboldGirlEntity(EntityType<? extends PathfinderMob> entityType, Level level) {
@@ -569,33 +591,33 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     @Override
     public boolean isPushable() {
-        return !this.isSleeping() && !this.isSpectatingDuel() && super.isPushable();
+        return !this.isSleeping() && !this.isDownedQueen() && !this.isSpectatingDuel() && super.isPushable();
     }
 
     @Override
     public void push(Entity entity) {
-        if (!this.isSleeping() && !this.isSpectatingDuel()) {
+        if (!this.isSleeping() && !this.isDownedQueen() && !this.isSpectatingDuel()) {
             super.push(entity);
         }
     }
 
     @Override
     public void push(double xa, double ya, double za) {
-        if (!this.isSleeping() && !this.isSpectatingDuel()) {
+        if (!this.isSleeping() && !this.isDownedQueen() && !this.isSpectatingDuel()) {
             super.push(xa, ya, za);
         }
     }
 
     @Override
     public void push(Vec3 vec) {
-        if (!this.isSleeping() && !this.isSpectatingDuel()) {
+        if (!this.isSleeping() && !this.isDownedQueen() && !this.isSpectatingDuel()) {
             super.push(vec);
         }
     }
 
     @Override
     public void knockback(double power, double xd, double zd, DamageSource source, float damage, boolean comesFromEffect) {
-        if (!this.isSleeping() && !this.isSpectatingDuel()) {
+        if (!this.isSleeping() && !this.isDownedQueen() && !this.isSpectatingDuel()) {
             super.knockback(power, xd, zd, source, damage, comesFromEffect);
         }
     }
@@ -645,6 +667,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         builder.define(DATA_PROFESSION_TIER, 1);
         builder.define(DATA_PROSPERITY, 0);
         builder.define(DATA_IS_REINCARNATING, false);
+        builder.define(DATA_IS_DOWNED_QUEEN, false);
+        builder.define(DATA_IS_MARKED_FOR_EXECUTION, false);
     }
 
     // Toda esta parte es para la generación de la tribu y su nombre
@@ -1314,7 +1338,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
         String given = this.getCustomGivenName();
         boolean hasGiven = !given.isEmpty();
-        ChatFormatting color = this.isAnyQueen() ? ChatFormatting.GOLD : ChatFormatting.GREEN;
+        ChatFormatting color = this.isAnyQueen() ? ChatFormatting.GOLD : (this.getProfession() == KoboldProfession.SORCERESS ? ChatFormatting.LIGHT_PURPLE : ChatFormatting.GREEN);
 
         if (this.isRebel()) {
             String rebelRole = this.getProfession() != KoboldProfession.NONE
@@ -1352,7 +1376,145 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public boolean isDefender() {
         KoboldProfession prof = this.getProfession();
-        return prof == KoboldProfession.GUARD || prof == KoboldProfession.VIGILANT;
+        return prof == KoboldProfession.GUARD || prof == KoboldProfession.VIGILANT || prof == KoboldProfession.SORCERESS;
+    }
+
+    public boolean isDownedQueen() {
+        return this.entityData.get(DATA_IS_DOWNED_QUEEN);
+    }
+
+    public void setDownedQueen(boolean downed) {
+        this.entityData.set(DATA_IS_DOWNED_QUEEN, downed);
+    }
+
+    public boolean isMarkedForExecution() {
+        return this.entityData.get(DATA_IS_MARKED_FOR_EXECUTION);
+    }
+
+    public void setMarkedForExecution(boolean marked) {
+        this.entityData.set(DATA_IS_MARKED_FOR_EXECUTION, marked);
+    }
+
+    public boolean isMagicUser() {
+        return this.isAnyQueen() || this.getProfession() == KoboldProfession.SORCERESS;
+    }
+
+    public static String getPlayerPrimaryTribe(Player player) {
+        if (player == null) return "";
+        String stored = player.getPersistentData().getString("PlayerOwnedTribe").orElse("");
+        if (!stored.isEmpty()) return stored;
+        String pending = player.getPersistentData().getString("PendingQueenSoulTribe").orElse("");
+        if (!pending.isEmpty()) return pending;
+        if (player.level() instanceof ServerLevel sl) {
+            for (Entity e : sl.getAllEntities()) {
+                if (e instanceof KoboldGirlEntity k && k.isAlive() && k.isOwnedBy(player) && k.hasTribe()) {
+                    String t = k.getTribeName();
+                    player.getPersistentData().putString("PlayerOwnedTribe", t);
+                    return t;
+                }
+            }
+        }
+        return "";
+    }
+
+    public static boolean doesPlayerOwnAnyTribe(Player player) {
+        return !getPlayerPrimaryTribe(player).isEmpty();
+    }
+
+    public static void annexTribeToPlayer(ServerLevel serverLevel, Player player, String oldTribeName, String newTribeName, @Nullable KoboldGirlEntity excludedEntity) {
+        if (serverLevel == null || player == null) return;
+        List<KoboldGirlEntity> members = serverLevel.getEntitiesOfClass(
+                KoboldGirlEntity.class,
+                player.getBoundingBox().inflate(128.0D),
+                k -> k != excludedEntity && k.isAlive() && (oldTribeName.isEmpty() || oldTribeName.equals(k.getTribeName()))
+        );
+
+        for (KoboldGirlEntity member : members) {
+            member.setTribeName(newTribeName);
+            member.setOwnerUUID(player.getUUID());
+            member.setRebel(false);
+            member.setPersistenceRequired();
+            member.setTarget(null);
+            member.unequipHands();
+            member.updateRulerCustomName();
+            serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER, member.getX(), member.getY() + 1.2D, member.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.05D);
+            serverLevel.sendParticles(ParticleTypes.HEART, member.getX(), member.getY() + 1.0D, member.getZ(), 4, 0.2D, 0.2D, 0.2D, 0.05D);
+        }
+
+        serverLevel.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.PLAYERS, 1.0F, 1.0F);
+        serverLevel.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 1.0F, 1.0F);
+    }
+
+    public void enterDownedQueenState(Player player) {
+        this.setHealth(1.0F);
+        this.setDownedQueen(true);
+        this.setMarkedForExecution(false);
+        this.playerDuelTargetUUID = null;
+        this.duelArenaCenter = null;
+        this.setTarget(null);
+        this.unequipHands();
+        this.getNavigation().stop();
+        this.setDeltaMovement(Vec3.ZERO);
+
+        if (this.level() instanceof ServerLevel sl) {
+            sl.sendParticles(ParticleTypes.ENCHANTED_HIT, this.getX(), this.getY() + 0.8D, this.getZ(), 25, 0.4D, 0.5D, 0.4D, 0.1D);
+            sl.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, this.getX(), this.getY() + 1.0D, this.getZ(), 20, 0.4D, 0.4D, 0.4D, 0.15D);
+            sl.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.SHIELD_BREAK, SoundSource.HOSTILE, 1.0F, 0.8F);
+            sl.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.PLAYERS, 0.9F, 1.2F);
+        }
+
+        player.sendSystemMessage(Component.literal("⚔ ¡La Reina ha caído derrotada! Usa tu Báculo de Mando con ella para decidir su destino.")
+                .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+    }
+
+    public void executeJudgment(ServerPlayer player, boolean spare) {
+        if (player == null || !(this.level() instanceof ServerLevel sl)) return;
+
+        if (spare) {
+            String primaryTribe = getPlayerPrimaryTribe(player);
+            String oldTribe = this.getTribeName();
+
+            this.setDownedQueen(false);
+            this.setMarkedForExecution(false);
+            this.setQueen(false);
+            this.setSurvivorQueen(false);
+            this.setProfession(KoboldProfession.SORCERESS);
+            this.setTribeName(primaryTribe);
+            this.setOwnerUUID(player.getUUID());
+            this.setPersistenceRequired();
+            this.setHealth(this.getMaxHealth());
+            this.updateRulerCustomName();
+
+            Component speaker = Component.literal("<" + (this.getCustomGivenName().isEmpty() ? "Hechicera" : this.getCustomGivenName()) + "> ").withStyle(ChatFormatting.LIGHT_PURPLE);
+            Component msg = Component.literal("Me has perdonado la vida aun cuando la victoria era tuya... Desde hoy pongo mis artes mágicas a tu servicio como Hechicera. Mi pueblo ahora pertenece a la tribu " + primaryTribe + ".")
+                    .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD);
+            player.sendSystemMessage(speaker.copy().append(msg));
+
+            annexTribeToPlayer(sl, player, oldTribe, primaryTribe, this);
+
+            sl.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, this.getX(), this.getY() + 1.2D, this.getZ(), 40, 0.5D, 0.5D, 0.5D, 0.15D);
+            sl.sendParticles(ParticleTypes.HEART, this.getX(), this.getY() + 1.2D, this.getZ(), 20, 0.4D, 0.4D, 0.4D, 0.1D);
+            sl.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.TOTEM_USE, SoundSource.NEUTRAL, 1.0F, 1.0F);
+            sl.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 1.0F, 1.0F);
+
+            int curLevel = player.getPersistentData().getInt("UnlockedBaculoLevel").orElse(1);
+            if (curLevel < 7) {
+                BaculoItem.upgradePlayerStaff(player, curLevel + 1);
+            }
+        } else {
+            this.setMarkedForExecution(true);
+
+            Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+            Component msg = Component.literal("Así que este es mi final... Que los ancestros me reciban.")
+                    .withStyle(ChatFormatting.DARK_RED, ChatFormatting.ITALIC);
+            player.sendSystemMessage(speaker.copy().append(msg));
+
+            player.sendSystemMessage(Component.literal("🗡 La Reina ha sido sentenciada a muerte. Un último golpe sellará su destino.")
+                    .withStyle(ChatFormatting.RED, ChatFormatting.BOLD));
+
+            sl.sendParticles(ParticleTypes.SMOKE, this.getX(), this.getY() + 0.8D, this.getZ(), 15, 0.3D, 0.4D, 0.3D, 0.05D);
+            sl.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.WITHER_DEATH, SoundSource.HOSTILE, 0.6F, 1.6F);
+        }
     }
 
     public boolean isPatrolSquadLeader() {
@@ -1400,7 +1562,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     }
 
     public void updatePatrolSquad() {
-        if (!this.isDefender() || this.level().isClientSide()) {
+        if (!this.isDefender() || this.getProfession() == KoboldProfession.SORCERESS || this.level().isClientSide()) {
             this.patrolSquadLeaderUUID = null;
             this.patrolSquadId = 0;
             this.patrolSquadTotalGroups = 1;
@@ -1501,6 +1663,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public void setQueen(boolean queen) {
         this.entityData.set(DATA_IS_QUEEN, queen);
+        if (queen) {
+            this.setPersistenceRequired();
+        }
     }
 
     public boolean isSubdita() {
@@ -1552,6 +1717,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         this.setRebel(false);
         this.setInPowerStruggle(false);
         this.setProfession(KoboldProfession.NONE);
+        this.setPersistenceRequired();
 
         if (this.pendingReincarnatedQueenName != null && !this.pendingReincarnatedQueenName.isEmpty()) {
             if (!this.pendingReincarnatedQueenName.startsWith("Reina")) {
@@ -1584,21 +1750,61 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         String oldTribeName = this.getTribeName();
         this.setTribeName(newTribeName);
         this.updateRulerCustomName();
+        player.getPersistentData().putString("PlayerOwnedTribe", newTribeName);
 
         if (this.level() instanceof ServerLevel serverLevel) {
+            // Obtener todas las integrantes (leales y rebeldes) que pertenecían a la tribu o están vinculadas al jugador
             List<KoboldGirlEntity> members = serverLevel.getEntitiesOfClass(
                     KoboldGirlEntity.class,
                     this.getBoundingBox().inflate(128.0D),
-                    k -> k.isAlive() && k.isOwnedBy(player) && (oldTribeName.equals(k.getTribeName()) || k.isRebel())
+                    k -> k != this && k.isAlive() && (oldTribeName.isEmpty() ? k.isOwnedBy(player) : (oldTribeName.equals(k.getTribeName()) || k.isOwnedBy(player)))
             );
+
+            List<KoboldGirlEntity> agitatedRebels = new ArrayList<>();
+
             for (KoboldGirlEntity member : members) {
                 member.setTribeName(newTribeName);
                 member.updateRulerCustomName();
-                serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER, member.getX(), member.getY() + 1.2D, member.getZ(), 6, 0.2D, 0.2D, 0.2D, 0.05D);
+                member.setPersistenceRequired();
+
+                if (member.isRebel()) {
+                    agitatedRebels.add(member);
+                } else {
+                    serverLevel.sendParticles(ParticleTypes.HAPPY_VILLAGER, member.getX(), member.getY() + 1.2D, member.getZ(), 6, 0.2D, 0.2D, 0.2D, 0.05D);
+                }
             }
 
             serverLevel.sendParticles(ParticleTypes.FIREWORK, this.getX(), this.getY() + 1.5D, this.getZ(), 25, 0.4D, 0.5D, 0.4D, 0.1D);
             serverLevel.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 1.0F, 1.1F);
+
+            // Reacción de súbditas rebeldes ante el cambio de nombre:
+            // Se oponen al cambio atacando al jugador en señal de protesta (NO atacan a la Reina).
+            // La Reina interviene inmediatamente con una reprimenda para someterlas y cesar la hostilidad.
+            if (!agitatedRebels.isEmpty()) {
+                this.setReprimandCooldown(0);
+                this.setForcedReprimandTarget(agitatedRebels.get(0));
+
+                for (KoboldGirlEntity rebel : agitatedRebels) {
+                    rebel.setTarget(player);
+                    rebel.equipForCombat(true);
+                    rebel.setReprimandedCooldown(0);
+
+                    serverLevel.sendParticles(ParticleTypes.ANGRY_VILLAGER, rebel.getX(), rebel.getY() + 1.2D, rebel.getZ(), 14, 0.3D, 0.3D, 0.3D, 0.05D);
+                    serverLevel.playSound(null, rebel.getX(), rebel.getY(), rebel.getZ(), SoundEvents.VILLAGER_NO, SoundSource.NEUTRAL, 1.0F, 0.9F);
+
+                    String rebelName = rebel.getCustomGivenName().isEmpty()
+                            ? rebel.getProfession().getDisplayName() + " Rebelde"
+                            : rebel.getCustomGivenName() + " [" + rebel.getProfession().getDisplayName() + " Rebelde]";
+
+                    player.sendSystemMessage(Component.literal("<" + rebelName + "> ").withStyle(ChatFormatting.RED)
+                            .append(Component.literal("¡Jamás aceptaremos que borres el nombre de nuestra tribu! ¡La tribu " + oldTribeName + " no se inclinará ante tus caprichos!")
+                                    .withStyle(ChatFormatting.RED, ChatFormatting.ITALIC)));
+                }
+
+                Component queenWarningSpeaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+                player.sendSystemMessage(queenWarningSpeaker.copy().append(Component.literal("¡Insolentes! ¡No toleraré que ataquen a nuestro gobernante por este cambio sagrado!")
+                        .withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD)));
+            }
         }
 
         Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
@@ -1652,6 +1858,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public void setOwnerUUID(@Nullable UUID ownerUUID) {
         this.entityData.set(DATA_OWNER_UUID, ownerUUID != null ? ownerUUID.toString() : "");
+        if (ownerUUID != null) {
+            this.setPersistenceRequired();
+        }
     }
 
     public @Nullable KoboldGirlEntity getTribeQueen() {
@@ -1715,6 +1924,19 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
         if (uuid == null) return null;
         return this.level().getPlayerByUUID(uuid);
+    }
+
+    @Override
+    public boolean removeWhenFarAway(double distanceToClosestPlayer) {
+        if (this.isOwned() || this.isAnyQueen() || this.hasCustomName()) {
+            return false;
+        }
+        return super.removeWhenFarAway(distanceToClosestPlayer);
+    }
+
+    @Override
+    public boolean requiresCustomPersistence() {
+        return super.requiresCustomPersistence() || this.isOwned() || this.isAnyQueen();
     }
 
     private @Nullable UUID playerDuelTargetUUID = null;
@@ -2123,9 +2345,50 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if (player == null || !(this.level() instanceof ServerLevel level)) return;
         if (this.isOwnedBy(player)) return;
 
+        String primaryTribe = getPlayerPrimaryTribe(player);
+        boolean isSecondaryTribe = !primaryTribe.isEmpty() && !primaryTribe.equals(this.getTribeName());
+
+        if (isSecondaryTribe) {
+            String oldTribe = this.getTribeName();
+            // Abdica del trono y adquiere la profesión de Hechicera manteniendo sus poderes mágicos
+            this.setQueen(false);
+            this.setSurvivorQueen(false);
+            this.setProfession(KoboldProfession.SORCERESS);
+            this.setOwnerUUID(player.getUUID());
+            this.setTribeName(primaryTribe);
+            this.setRebel(false);
+            this.setHealth(this.getMaxHealth());
+            this.setPersistenceRequired();
+            this.updateRulerCustomName();
+
+            Component speaker = Component.literal("<" + (this.getCustomGivenName().isEmpty() ? "Hechicera" : this.getCustomGivenName()) + "> ").withStyle(ChatFormatting.LIGHT_PURPLE);
+            Component peacefulRulerMsg = Component.literal("Has demostrado tu sabiduría y bondad hacia mi pueblo. Cedo mi corona con honor y me pongo a tu servicio como Hechicera. Desde hoy nos unimos a la tribu " + primaryTribe + ".")
+                    .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD);
+            player.sendSystemMessage(speaker.copy().append(peacefulRulerMsg));
+
+            level.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.5D, this.getZ(), 50, 0.8D, 0.8D, 0.8D, 0.1D);
+            level.sendParticles(ParticleTypes.HEART, this.getX(), this.getY() + 1.2D, this.getZ(), 25, 0.6D, 0.6D, 0.6D, 0.1D);
+            level.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.UI_TOAST_CHALLENGE_COMPLETE, SoundSource.NEUTRAL, 1.0F, 1.0F);
+            level.playSound(null, player.getX(), player.getY(), player.getZ(), SoundEvents.PLAYER_LEVELUP, SoundSource.PLAYERS, 1.0F, 1.0F);
+
+            // Anexar toda la tribu secundaria a la tribu del jugador
+            annexTribeToPlayer(level, player, oldTribe, primaryTribe, this);
+
+            player.sendSystemMessage(Component.literal("🎉 ¡Alianza pacífica completada! La tribu " + oldTribe + " ha sido anexada a tu tribu " + primaryTribe + ". La antigua reina ahora te sirve como Hechicera.")
+                    .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+
+            int curLevel = player.getPersistentData().getInt("UnlockedBaculoLevel").orElse(1);
+            if (curLevel < 7) {
+                BaculoItem.upgradePlayerStaff(player, curLevel + 1);
+            }
+            return;
+        }
+
+        player.getPersistentData().putString("PlayerOwnedTribe", this.getTribeName());
         this.setOwnerUUID(player.getUUID());
         this.setRebel(false);
         this.setHealth(this.getMaxHealth());
+        this.setPersistenceRequired();
         this.updateRulerCustomName();
 
         // Diálogos de agradecimiento
@@ -2152,6 +2415,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         for (KoboldGirlEntity subdita : subditas) {
             subdita.setOwnerUUID(player.getUUID());
             subdita.setRebel(false);
+            subdita.setPersistenceRequired();
             subdita.setTarget(null);
             subdita.unequipHands();
             subdita.updateRulerCustomName();
@@ -2257,6 +2521,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     public void setSurvivorQueen(boolean survivorQueen) {
         this.entityData.set(DATA_IS_SURVIVOR_QUEEN, survivorQueen);
+        if (survivorQueen) {
+            this.setPersistenceRequired();
+        }
     }
 
     public boolean isInQueenDuel() {
@@ -2290,9 +2557,12 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         boolean thisIsQueen = this.isAnyQueen();
         boolean otherIsQueen = other.isAnyQueen();
         if ((thisIsQueen && other.isRebel()) || (this.isRebel() && otherIsQueen)) {
-            boolean isPlayerTribe = (thisIsQueen && this.isOwned()) || (otherIsQueen && other.isOwned());
-            if (isPlayerTribe && this.getTribeName().equals(other.getTribeName())) {
-                return false;
+            KoboldGirlEntity queen = thisIsQueen ? this : other;
+            KoboldGirlEntity rebel = thisIsQueen ? other : this;
+            if (queen.isOwned()) {
+                if (rebel.getTribeName().equals(queen.getTribeName()) || rebel.distanceToSqr(queen) <= 64.0D * 64.0D) {
+                    return false;
+                }
             }
             if (!this.isOwned() && !other.isOwned()) {
                 return true;
@@ -2302,13 +2572,15 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         if ((this.isOwned() && !this.isAnyQueen() && other.isRebel()) || (this.isRebel() && other.isOwned() && !other.isAnyQueen())) {
             return false;
         }
-        // 4. Si esta Kobold es rebelde, solo ataca a kobolds de tribus rivales
+        // 4. Si esta Kobold es rebelde, solo ataca a kobolds de tribus rivales (y jamás a una reina perteneciente al jugador)
         if (this.isRebel()) {
             if (other.isRebel()) return false;
+            if (other.isAnyQueen() && other.isOwned()) return false;
             return !this.getTribeName().equals(other.getTribeName());
         }
         // 5. Si la otra Kobold es rebelde pero esta no es leal al jugador osea es de tribu rival salvaje
         if (other.isRebel()) {
+            if (this.isAnyQueen() && this.isOwned()) return false;
             return !this.isRebel() && !this.isOwned();
         }
         return false;
@@ -2452,6 +2724,15 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     protected void customServerAiStep(ServerLevel level) {
         super.customServerAiStep(level);
 
+        // Si está en estado Downed (derrotada a 1 HP esperando juicio): se mantiene totalmente inmóvil
+        if (this.isDownedQueen()) {
+            this.getNavigation().stop();
+            this.setDeltaMovement(Vec3.ZERO);
+            this.setTarget(null);
+            this.unequipHands();
+            return;
+        }
+
         // Gestión de reencarnación del alma de la reina mediante el Báculo
         if (this.isReincarnating()) {
             this.getNavigation().stop();
@@ -2497,6 +2778,31 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
         if (this.baculoStareCooldown > 0) {
             this.baculoStareCooldown--;
+        }
+
+        // Detección de proximidad: Reina de otra tribu advirtiendo al jugador que ya gobierna una tribu
+        if (this.isAnyQueen() && !this.isOwned() && !this.isDownedQueen() && !this.isInPlayerDuel() && !this.isInQueenDuel() && this.tickCount % 20 == 0) {
+            Player nearbyPlayer = this.level().getNearestPlayer(this, 9.0D);
+            if (nearbyPlayer instanceof ServerPlayer serverPlayer && !serverPlayer.isSpectator() && !serverPlayer.isCreative()) {
+                if (doesPlayerOwnAnyTribe(serverPlayer)) {
+                    long now = this.level().getGameTime();
+                    Long lastGreet = LAST_AURA_GREETING_TICK.get(serverPlayer.getUUID());
+                    if (lastGreet == null || now - lastGreet > 600L) { // 30 segundos de enfriamiento
+                        LAST_AURA_GREETING_TICK.put(serverPlayer.getUUID(), now);
+                        this.getLookControl().setLookAt(serverPlayer, 30.0F, 30.0F);
+                        this.setYBodyRot(this.getYHeadRot());
+
+                        Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+                        Component auraMsg = Component.literal("Esa aura es inconfundible... pero me sorprende que sea un humano quien la porta. Dime ¿acaso vienes a someter a mi pueblo?")
+                                .withStyle(ChatFormatting.LIGHT_PURPLE, ChatFormatting.ITALIC);
+                        serverPlayer.sendSystemMessage(speaker.copy().append(auraMsg));
+
+                        level.sendParticles(ParticleTypes.ENCHANT, this.getX(), this.getY() + 1.2D, this.getZ(), 14, 0.4D, 0.4D, 0.4D, 0.05D);
+                        level.sendParticles(ParticleTypes.PORTAL, this.getX(), this.getY() + 1.0D, this.getZ(), 8, 0.3D, 0.3D, 0.3D, 0.02D);
+                        level.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.ILLUSIONER_PREPARE_BLINDNESS, SoundSource.NEUTRAL, 0.8F, 1.2F);
+                    }
+                }
+            }
         }
 
         // Monitoreo del duelo a casi muerte contra el jugador
@@ -3159,6 +3465,30 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     }
 
     private void handleQueenDeath(ServerLevel level, DamageSource damageSource) {
+        // Caso de Ejecución formal tras juicio:
+        if (this.isMarkedForExecution()) {
+            Player killerPlayer = null;
+            if (damageSource.getEntity() instanceof Player p) {
+                killerPlayer = p;
+            } else if (this.getLastHurtByMob() instanceof Player p) {
+                killerPlayer = p;
+            } else {
+                killerPlayer = level.getNearestPlayer(this, 32.0D);
+            }
+            if (killerPlayer != null) {
+                String primaryTribe = getPlayerPrimaryTribe(killerPlayer);
+                String oldTribe = this.getTribeName();
+                String queenName = this.getCustomGivenName().isEmpty() ? this.getQueenTitle() : this.getCustomGivenName();
+                // Liberar el alma de la reina para ser recolectada en el báculo
+                QueenSoulTracker.spawnSoul(killerPlayer, queenName, oldTribe, this.position().add(0, 1.0D, 0));
+                // Anexar la tribu entera a la tribu del jugador
+                annexTribeToPlayer(level, killerPlayer, oldTribe, primaryTribe, this);
+                killerPlayer.sendSystemMessage(Component.literal("⚔ Has ejecutado a la Reina de " + oldTribe + ". Toda su tribu ha sido anexada a tu tribu " + primaryTribe + ".")
+                        .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+            }
+            return;
+        }
+
         KoboldGirlEntity winningQueen = null;
         if (this.getTarget() instanceof KoboldGirlEntity rival && rival.isQueen() && rival.isAlive() && !rival.getTribeName().equals(this.getTribeName())) {
             winningQueen = rival;
@@ -5171,6 +5501,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     }
 
     public void equipBestWeapon() {
+        if (this.isMagicUser()) return;
         ItemStack current = this.getMainHandItem();
         double currentRating = isWeapon(current) ? this.evaluateWeaponRating(current) : -1.0D;
         int bestInvIndex = -1;
@@ -6039,7 +6370,36 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
     @Override
     public InteractionResult mobInteract(Player player, InteractionHand hand) {
-        // 0. Si está durmiendo, clic derecho la despierta
+        // 0. Si es Reina Derrotada a 1 HP tras duelo contra jugador gobernante:
+        if (this.isDownedQueen()) {
+            if (isHoldingBaculo(player)) {
+                if (!this.level().isClientSide() && player instanceof ServerPlayer serverPlayer) {
+                    if (this.isMarkedForExecution()) {
+                        serverPlayer.sendSystemMessage(Component.literal("§cLa Reina ya ha sido sentenciada a muerte. Asesta el golpe de gracia para concluir.")
+                                .withStyle(ChatFormatting.RED));
+                    } else {
+                        PacketDistributor.sendToPlayer(serverPlayer, new OpenQueenDialoguePayload(
+                                this.getId(),
+                                this.getQueenTitle(),
+                                this.getTribeName(),
+                                false,
+                                false,
+                                true,
+                                true
+                        ));
+                    }
+                }
+                return InteractionResult.SUCCESS;
+            } else {
+                if (!this.level().isClientSide()) {
+                    player.sendSystemMessage(Component.literal("§eLa Reina está inmóvil e indefensa. Usa el Báculo de Mando con ella para decidir su destino.")
+                            .withStyle(ChatFormatting.YELLOW));
+                }
+                return InteractionResult.SUCCESS;
+            }
+        }
+
+        // 0.1. Si está durmiendo, clic derecho la despierta
         if (this.isSleeping()) {
             if (!this.level().isClientSide()) {
                 this.stopSleeping();
@@ -6562,8 +6922,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
                 Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
                 if (!wasChosen) {
-                    Component msg = Component.literal("Si deseas ganarte la lealtad de mi tribu con sabiduría, ayúdanos con estas ofrendas.")
-                            .withStyle(ChatFormatting.GREEN);
+                    Component msg = doesPlayerOwnAnyTribe(player)
+                            ? Component.literal("Si tus palabras son sinceras y vienes a ayudarnos como a tu pueblo, muéstralo con estas ofrendas.").withStyle(ChatFormatting.GREEN)
+                            : Component.literal("Si deseas ganarte la lealtad de mi tribu con sabiduría, ayúdanos con estas ofrendas.").withStyle(ChatFormatting.GREEN);
                     player.sendSystemMessage(speaker.copy().append(msg));
                 }
 
@@ -6622,6 +6983,16 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     }
                 }
                 this.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.0F);
+            }
+            case QueenDialogueActionPayload.ACTION_JUDGMENT_EXECUTE -> {
+                if (this.isDownedQueen()) {
+                    this.executeJudgment(player, false);
+                }
+            }
+            case QueenDialogueActionPayload.ACTION_JUDGMENT_SPARE -> {
+                if (this.isDownedQueen()) {
+                    this.executeJudgment(player, true);
+                }
             }
         }
     }
@@ -6736,7 +7107,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 k -> k.isAlive() && k.isOwnedBy(player) && Objects.equals(k.getTribeName(), this.getTribeName())
         );
 
-        int farmers = 0, hunters = 0, guards = 0, vigilants = 0, builders = 0, unassigned = 0, tier2Count = 0;
+        int farmers = 0, hunters = 0, guards = 0, vigilants = 0, builders = 0, sorceresses = 0, unassigned = 0, tier2Count = 0;
         int following = 0, guarding = 0, working = 0;
 
         for (KoboldGirlEntity k : tribe) {
@@ -6747,6 +7118,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 case GUARD -> guards++;
                 case VIGILANT -> vigilants++;
                 case BUILDER -> builders++;
+                case SORCERESS -> sorceresses++;
                 case NONE -> unassigned++;
             }
             if (k.getProfessionTier() >= 2) tier2Count++;
@@ -6773,6 +7145,9 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         player.sendSystemMessage(Component.literal("§7Población leal: §a" + tribe.size() + " Kobolds"));
         player.sendSystemMessage(Component.literal("§a  🌾 Granjeras: " + farmers + " | 🏹 Cazadoras: " + hunters + " | 🔨 Constructoras: " + builders));
         player.sendSystemMessage(Component.literal("§9  🛡 Guardias: " + guards + " | 👁 Vigilantes: " + vigilants));
+        if (sorceresses > 0) {
+            player.sendSystemMessage(Component.literal("§d  ✨ Hechiceras arcanas: " + sorceresses));
+        }
         if (unassigned > 0) {
             player.sendSystemMessage(Component.literal("§8  ❔ Súbditas sin asignar: " + unassigned));
         }
@@ -6810,10 +7185,14 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         this.heal(8.0F);
 
         // Otorgar propiedad de la reina al jugador manteniendo su estatus y dignidad real
+        if (getPlayerPrimaryTribe(player).isEmpty()) {
+            player.getPersistentData().putString("PlayerOwnedTribe", this.getTribeName());
+        }
         this.setOwnerUUID(player.getUUID());
         this.setRebel(false);
         this.setQueen(true);
         this.setProfession(KoboldProfession.NONE);
+        this.setPersistenceRequired();
         this.updateRulerCustomName();
 
         // Diálogo de sumisión y reconocimiento
@@ -6869,6 +7248,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     // Aliada leal: ahora es propiedad del jugador
                     subdita.setRebel(false);
                     subdita.setOwnerUUID(player.getUUID());
+                    subdita.setPersistenceRequired();
                     subdita.setTarget(null);
                     subdita.unequipHands();
                     subdita.updateRulerCustomName();
@@ -7764,7 +8144,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             }
 
             this.mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
-            if (this.mob.isAnyQueen() || (isRangedWeapon(this.mob.getMainHandItem()) && this.mob.hasArrows())) {
+            if (this.mob.isMagicUser() || (isRangedWeapon(this.mob.getMainHandItem()) && this.mob.hasArrows())) {
                 this.faceTargetDirectly(target);
             }
 
@@ -7773,8 +8153,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             if (this.attackCooldown > 0) this.attackCooldown--;
             if (this.leapCooldown > 0) this.leapCooldown--;
 
-            // Si es la Reina: Táctica de combate puramente mágica (sin armas cuerpo a cuerpo ni a distancia)
-            if (this.mob.isAnyQueen()) {
+            // Si es la Reina o Hechicera: Táctica de combate puramente mágica (sin armas cuerpo a cuerpo ni a distancia)
+            if (this.mob.isMagicUser()) {
                 this.tickQueenMagicTactic(target, dist);
                 return;
             }
@@ -10389,6 +10769,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                     k -> k != this.mob && k.isAlive() && !k.isRebel()
                             && !this.mob.getTribeName().isEmpty() && !k.getTribeName().isEmpty()
                             && !k.getTribeName().equals(this.mob.getTribeName())
+                            && !(k.isAnyQueen() && k.isOwned())
                             && this.mob.hasLineOfSight(k)
             );
             if (enemies.isEmpty()) return false;
@@ -10545,11 +10926,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             LivingEntity attacker = this.kobold.getLastHurtByMob();
             if (attacker instanceof KoboldGirlEntity k) {
                 // Reina o súbditas de la tribu del jugador nunca toman represalia contra rebeldes de su propia tribu
-                if (this.kobold.isOwned() && k.isRebel() && this.kobold.getTribeName().equals(k.getTribeName())) {
+                if (this.kobold.isOwned() && k.isRebel() && (this.kobold.getTribeName().equals(k.getTribeName()) || this.kobold.distanceToSqr(k) <= 64.0D * 64.0D)) {
                     return false;
                 }
                 // Rebeldes de la tribu del jugador nunca toman represalia contra la reina leal de su tribu
-                if (this.kobold.isRebel() && k.isAnyQueen() && k.isOwned() && this.kobold.getTribeName().equals(k.getTribeName())) {
+                if (this.kobold.isRebel() && k.isAnyQueen() && k.isOwned()) {
                     return false;
                 }
             }
@@ -10561,12 +10942,11 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             if (other instanceof KoboldGirlEntity koboldOther) {
                 // Súbditas y reinas leales no toman represalia ni se alertan contra rebeldes de su tribu
                 if (hurtByMob instanceof KoboldGirlEntity k && k.isRebel() && koboldOther.isOwned()
-                        && koboldOther.getTribeName().equals(k.getTribeName())) {
+                        && (koboldOther.getTribeName().equals(k.getTribeName()) || koboldOther.distanceToSqr(k) <= 64.0D * 64.0D)) {
                     return;
                 }
                 // Rebeldes no se alertan contra la reina leal de su tribu
-                if (hurtByMob instanceof KoboldGirlEntity k && k.isAnyQueen() && k.isOwned() && koboldOther.isRebel()
-                        && koboldOther.getTribeName().equals(k.getTribeName())) {
+                if (hurtByMob instanceof KoboldGirlEntity k && k.isAnyQueen() && k.isOwned() && koboldOther.isRebel()) {
                     return;
                 }
                 // No alertar si está durmiendo, en duelo de reinas o en guerra por el poder
@@ -10610,6 +10990,15 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             if (this.queen.isInPlayerDuel() || this.queen.isInQueenDuel() || this.queen.isInPowerStruggle()) {
                 return false;
             }
+            if (this.queen.getForcedReprimandTarget() != null) {
+                KoboldGirlEntity forced = this.queen.getForcedReprimandTarget();
+                if (forced != null && forced.isAlive() && forced.isRebel()) {
+                    this.targetRebel = forced;
+                    return true;
+                } else {
+                    this.queen.setForcedReprimandTarget(null);
+                }
+            }
             if (this.queen.getReprimandCooldown() > 0) {
                 return false;
             }
@@ -10621,10 +11010,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             // Buscar si hay alguna súbdita rebelde de la tribu que esté atacando o teniendo como objetivo al gobernante
             List<KoboldGirlEntity> nearbyRebels = this.queen.level().getEntitiesOfClass(
                     KoboldGirlEntity.class,
-                    this.queen.getBoundingBox().inflate(24.0D, 12.0D, 24.0D),
+                    this.queen.getBoundingBox().inflate(48.0D, 16.0D, 48.0D),
                     k -> k != this.queen && k.isAlive() && k.isRebel()
                             && (k.getTarget() == owner || owner.getLastHurtByMob() == k)
-                            && (this.queen.getTribeName().isEmpty() || k.getTribeName().equals(this.queen.getTribeName()))
+                            && (this.queen.getTribeName().isEmpty() || k.getTribeName().equals(this.queen.getTribeName()) || k.distanceToSqr(this.queen) <= 48.0D * 48.0D)
             );
 
             if (nearbyRebels.isEmpty()) return false;
@@ -10638,7 +11027,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             if (this.deliveredHit) return false;
             if (this.targetRebel == null || !this.targetRebel.isAlive() || !this.targetRebel.isRebel()) return false;
             if (!this.queen.isAlive() || this.queen.isSleeping()) return false;
-            return this.queen.distanceToSqr(this.targetRebel) <= 32.0D * 32.0D;
+            return this.queen.distanceToSqr(this.targetRebel) <= 48.0D * 48.0D;
         }
 
         @Override
@@ -10649,7 +11038,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             this.queen.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY);
             this.queen.setItemInHand(InteractionHand.OFF_HAND, ItemStack.EMPTY);
             if (this.targetRebel != null) {
-                this.queen.getNavigation().moveTo(this.targetRebel, 1.35D);
+                this.queen.getNavigation().moveTo(this.targetRebel, 1.45D);
             }
         }
 
@@ -10658,6 +11047,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             this.targetRebel = null;
             this.deliveredHit = false;
             this.queen.setTarget(null);
+            this.queen.setForcedReprimandTarget(null);
         }
 
         @Override
@@ -10672,7 +11062,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             this.queen.getLookControl().setLookAt(this.targetRebel, 30.0F, 30.0F);
 
             if (this.queen.getNavigation().isDone() || this.queen.tickCount % 10 == 0) {
-                this.queen.getNavigation().moveTo(this.targetRebel, 1.35D);
+                this.queen.getNavigation().moveTo(this.targetRebel, 1.45D);
             }
 
             double distSqr = this.queen.distanceToSqr(this.targetRebel);
@@ -10711,7 +11101,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 String[] reprimands = {
                     "¡Basta! ¡No permitiré que ataques a nuestro gobernante!",
                     "¡Compórtate! Acepta el mandato o retírate, pero no toleraré tu insubordinación.",
-                    "¡Suficiente insolencia! ¡Respeta a quien ahora guía con honor a nuestra tribu!"
+                    "¡Suficiente insolencia! ¡Respeta a quien ahora guía con honor a nuestra tribu!",
+                    "¡Basta ya! ¡Acepta con respeto el nuevo nombre que nuestro gobernante ha otorgado a la tribu!"
                 };
                 String rebuke = reprimands[this.queen.getRandom().nextInt(reprimands.length)];
                 Component speaker = Component.literal("<" + this.queen.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
@@ -10724,7 +11115,19 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
 
                 // La Reina cesa inmediatamente la agresión
                 this.queen.setTarget(null);
-                this.queen.setReprimandCooldown(100);
+                this.queen.setForcedReprimandTarget(null);
+
+                // Si aún hay otra rebelde atacando al dueño, dejar reprimandCooldown en 0 para reprenderla de inmediato
+                boolean hasMoreRebelsAttacking = false;
+                if (owner != null && this.queen.level() instanceof ServerLevel sl) {
+                    hasMoreRebelsAttacking = !sl.getEntitiesOfClass(
+                            KoboldGirlEntity.class,
+                            this.queen.getBoundingBox().inflate(48.0D, 16.0D, 48.0D),
+                            k -> k != this.queen && k != this.targetRebel && k.isAlive() && k.isRebel()
+                                    && (k.getTarget() == owner || owner.getLastHurtByMob() == k)
+                    ).isEmpty();
+                }
+                this.queen.setReprimandCooldown(hasMoreRebelsAttacking ? 0 : 100);
                 this.queen.getNavigation().stop();
             }
         }
@@ -10848,12 +11251,19 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
                 return;
             }
 
-            // Si el jugador está a más de 3 bloques: alejarse de él manteniéndose dentro de los 15 bloques de la Reina
-            if (distToPlayer > 3.0D) {
-                if (this.mob.getTarget() == this.targetPlayer) {
+            // Si la rebelde ya está atacando activamente al jugador (por ejemplo, en protesta por cambio de nombre o por provocación):
+            if (this.mob.getTarget() == this.targetPlayer) {
+                if (distToPlayer > 18.0D) {
                     this.mob.setTarget(null);
                     this.mob.unequipHands();
+                } else {
+                    this.mob.getLookControl().setLookAt(this.targetPlayer, 30.0F, 30.0F);
+                    return; // Permitir que KoboldAdaptiveCombatGoal ejecute el combate hacia el jugador hasta la reprimenda de la Reina
                 }
+            }
+
+            // Si no está atacando y el jugador está a más de 3 bloques: alejarse de él manteniéndose cerca de la Reina
+            if (distToPlayer > 3.0D) {
                 this.mob.getLookControl().setLookAt(this.targetPlayer, 30.0F, 30.0F);
                 this.fleeFromWithAnchor(this.targetPlayer.position(), 8.0D, queenPos, 15.0D, 1.2D);
             } else {
@@ -12210,16 +12620,34 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
             return false;
         }
 
+        // Si la Reina está en estado Downed (derrotada a 1 HP tras duelo):
+        if (this.isDownedQueen()) {
+            if (!this.isMarkedForExecution()) {
+                // Invulnerable hasta que el jugador decida ejecutarla formalmente con el Báculo
+                level.sendParticles(ParticleTypes.ENCHANTED_HIT, this.getX(), this.getY() + 0.8D, this.getZ(), 8, 0.25D, 0.3D, 0.25D, 0.05D);
+                level.sendParticles(ParticleTypes.WITCH, this.getX(), this.getY() + 0.5D, this.getZ(), 5, 0.15D, 0.2D, 0.15D, 0.02D);
+                level.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.SHIELD_BLOCK, SoundSource.NEUTRAL, 0.5F, 1.6F);
+                return false;
+            }
+            // Si ya está marcada para ejecución, permitir que el golpe la remate
+            return super.hurtServer(level, damageSource, amount);
+        }
+
         if (damageSource.getEntity() instanceof KoboldGirlEntity koboldAttacker) {
             // Fuego amigo y rivalidad entre Kobolds:
             if (!this.canFightKobold(koboldAttacker)) {
                 // Excepción de disciplina: permitir exclusivamente el puñetazo no letal de la Reina leal (manos vacías y daño <= 1.0F)
                 if (koboldAttacker.isAnyQueen() && koboldAttacker.isOwned() && this.isRebel()
-                        && this.getTribeName().equals(koboldAttacker.getTribeName())
+                        && (this.getTribeName().equals(koboldAttacker.getTribeName()) || this.distanceToSqr(koboldAttacker) <= 64.0D * 64.0D)
                         && koboldAttacker.getMainHandItem().isEmpty() && amount <= 1.0F) {
                     boolean hurt = super.hurtServer(level, damageSource, amount);
                     this.setTarget(null);
                     return hurt;
+                }
+                // Si una rebelde intenta agredir o daña accidentalmente a su Reina leal:
+                if (this.isAnyQueen() && this.isOwned() && koboldAttacker.isRebel()) {
+                    this.setReprimandCooldown(0);
+                    this.setForcedReprimandTarget(koboldAttacker);
                 }
                 return false;
             }
@@ -12233,16 +12661,18 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         }
 
         // Duelo de Dominancia entre Reina y Jugador:
-        // Una vez que la reina de la tribu llegue a 2 puntos de vida esta no puede recibir más daño
-        // y reconoce al jugador como gobernante.
+        // Si el jugador ya posee una tribu, la reina derrotada queda a 1 HP e invulnerable (Downed) para decidir su destino
         if (this.isInPlayerDuel()) {
             Player duelPlayer = this.getPlayerDuelTarget();
             if (this.getHealth() <= 2.0F || this.getHealth() - amount <= 2.0F) {
+                Player winner = duelPlayer != null ? duelPlayer : (damageSource.getEntity() instanceof Player p ? p : null);
+                if (winner != null && doesPlayerOwnAnyTribe(winner)) {
+                    this.enterDownedQueenState(winner);
+                    return false;
+                }
                 this.setHealth(2.0F);
-                if (duelPlayer != null) {
-                    this.resolvePlayerDominanceVictory(duelPlayer);
-                } else if (damageSource.getEntity() instanceof Player p) {
-                    this.resolvePlayerDominanceVictory(p);
+                if (winner != null) {
+                    this.resolvePlayerDominanceVictory(winner);
                 }
                 return false;
             }
@@ -12295,6 +12725,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         output.putBoolean("IsRebel", this.isRebel());
         output.putBoolean("IsInPowerStruggle", this.isInPowerStruggle());
         output.putBoolean("IsSurvivorQueen", this.isSurvivorQueen());
+        output.putBoolean("IsDownedQueen", this.isDownedQueen());
+        output.putBoolean("IsMarkedForExecution", this.isMarkedForExecution());
         output.putString("Profession", this.getProfession().name());
         output.putInt("FoodLevel", this.getFoodLevel());
         output.putFloat("Saturation", this.getSaturationLevel());
@@ -12403,6 +12835,8 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         this.setRebel(input.getBooleanOr("IsRebel", false));
         this.setInPowerStruggle(input.getBooleanOr("IsInPowerStruggle", false));
         this.setSurvivorQueen(input.getBooleanOr("IsSurvivorQueen", false));
+        this.setDownedQueen(input.getBooleanOr("IsDownedQueen", false));
+        this.setMarkedForExecution(input.getBooleanOr("IsMarkedForExecution", false));
         this.setProfession(KoboldProfession.fromString(input.getStringOr("Profession", "NONE")));
         String ownerStr = input.getStringOr("OwnerUUID", "");
         if (!ownerStr.isEmpty()) {
@@ -12529,6 +12963,10 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
         } else {
             this.reincarnationInitiatorPlayerUUID = null;
         }
+
+        if (this.isOwned() || this.isAnyQueen() || this.hasCustomName()) {
+            this.setPersistenceRequired();
+        }
     }
 
     /* =========================================================================
@@ -12625,7 +13063,7 @@ public class KoboldGirlEntity extends PathfinderMob implements GeoEntity, Mercha
     }
 
     private PlayState movementPredicate(AnimationTest<KoboldGirlEntity> state) {
-        if (this.isSleeping()) {
+        if (this.isSleeping() || this.isDownedQueen()) {
             return state.setAndContinue(SLEEP_ANIM);
         }
         if (state.isMoving()) {

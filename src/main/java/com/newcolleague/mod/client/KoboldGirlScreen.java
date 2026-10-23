@@ -113,6 +113,8 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
                     case GUARD -> 0xFF55AAFF;    // Azul férreo para Guardia
                     case VIGILANT -> 0xFF55FFFF; // Cian para Vigilante
                     case HUNTER -> 0xFFFFAA44;   // Naranja para Cazadora
+                    case BUILDER -> 0xFFFFD700;  // Dorado para Constructora
+                    case SORCERESS -> 0xFFFF55FF;// Púrpura / Rosa para Hechicera
                     default -> 0xFFEEDD88;       // Amarillo suave para Súbdita estándar
                 };
             }
@@ -172,6 +174,8 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
                         case GUARD -> ChatFormatting.BLUE;
                         case VIGILANT -> ChatFormatting.AQUA;
                         case HUNTER -> ChatFormatting.GOLD;
+                        case BUILDER -> ChatFormatting.YELLOW;
+                        case SORCERESS -> ChatFormatting.LIGHT_PURPLE;
                         default -> ChatFormatting.GRAY;
                     };
                     roleLine = Component.literal("Profesión: " + prof.getDisplayName()).withStyle(profFormat);
@@ -188,6 +192,8 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
                         case GUARD -> "• Espadas/mazos y escudos\n• +5% Daño Cuerpo a Cuerpo\n• Defiende a la tribu";
                         case VIGILANT -> "• Arcos y ballestas con munición\n• +5% Daño a Distancia\n• Defiende a la tribu";
                         case HUNTER -> "• Caza animales con hachas/arcos\n• Cocina carne en fogatas\n• Pacífica (autodefensa)";
+                        case BUILDER -> "• Acondiciona el terreno de aldea\n• Construye proyectos y edificios\n• Pacífica (autodefensa)";
+                        case SORCERESS -> "• Canaliza magia arcana ancestral\n• Rayos, Colmillos y Fuego\n• Defiende a la tribu";
                         default -> "";
                     };
                     if (!details.isEmpty()) {

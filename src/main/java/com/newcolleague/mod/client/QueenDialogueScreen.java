@@ -15,23 +15,38 @@ public class QueenDialogueScreen extends Screen {
     private final String tribeName;
     private final boolean pacifistRouteChosen;
     private final boolean isRuler;
+    private final boolean playerOwnsAnotherTribe;
+    private final boolean isDownedJudgment;
 
     private enum Stage {
         MAIN_MENU,
         TRIBE_CHANGE_SUBMENU,
-        RULER_GOVERNANCE
+        RULER_GOVERNANCE,
+        DOWNED_JUDGMENT
     }
 
     private Stage stage;
 
-    public QueenDialogueScreen(int queenEntityId, String queenTitle, String tribeName, boolean pacifistRouteChosen, boolean isRuler) {
+    public QueenDialogueScreen(int queenEntityId, String queenTitle, String tribeName, boolean pacifistRouteChosen, boolean isRuler, boolean playerOwnsAnotherTribe, boolean isDownedJudgment) {
         super(Component.literal(queenTitle));
         this.queenEntityId = queenEntityId;
         this.queenTitle = queenTitle;
         this.tribeName = tribeName;
         this.pacifistRouteChosen = pacifistRouteChosen;
         this.isRuler = isRuler;
-        this.stage = isRuler ? Stage.RULER_GOVERNANCE : Stage.MAIN_MENU;
+        this.playerOwnsAnotherTribe = playerOwnsAnotherTribe;
+        this.isDownedJudgment = isDownedJudgment;
+        if (isDownedJudgment) {
+            this.stage = Stage.DOWNED_JUDGMENT;
+        } else if (isRuler) {
+            this.stage = Stage.RULER_GOVERNANCE;
+        } else {
+            this.stage = Stage.MAIN_MENU;
+        }
+    }
+
+    public QueenDialogueScreen(int queenEntityId, String queenTitle, String tribeName, boolean pacifistRouteChosen, boolean isRuler) {
+        this(queenEntityId, queenTitle, tribeName, pacifistRouteChosen, isRuler, false, false);
     }
 
     @Override
@@ -143,8 +158,42 @@ public class QueenDialogueScreen extends Screen {
                     btn -> this.onClose()
             ).bounds(centerX - 60, startY + 156, 120, btnHeight).build());
 
+        } else if (this.stage == Stage.DOWNED_JUDGMENT) {
+            int startY = centerY - 15;
+
+            // Opción 1: Matar / Ejecutar
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("🗡 Matar a la Reina (Ejecutar)").withStyle(ChatFormatting.RED, ChatFormatting.BOLD),
+                    btn -> {
+                        ClientPacketDistributor.sendToServer(new QueenDialogueActionPayload(
+                                this.queenEntityId,
+                                QueenDialogueActionPayload.ACTION_JUDGMENT_EXECUTE
+                        ));
+                        this.onClose();
+                    }
+            ).bounds(centerX - btnWidth / 2, startY, btnWidth, btnHeight).build());
+
+            // Opción 2: Perdonar / Nombrar Hechicera
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("🕊 Perdonar la vida (Nombrar Hechicera)").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD),
+                    btn -> {
+                        ClientPacketDistributor.sendToServer(new QueenDialogueActionPayload(
+                                this.queenEntityId,
+                                QueenDialogueActionPayload.ACTION_JUDGMENT_SPARE
+                        ));
+                        this.onClose();
+                    }
+            ).bounds(centerX - btnWidth / 2, startY + 24, btnWidth, btnHeight).build());
+
+            // Opción 3: Cerrar
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("Cerrar (Decidir luego)").withStyle(ChatFormatting.GRAY),
+                    btn -> this.onClose()
+            ).bounds(centerX - 60, startY + 50, 120, btnHeight).build());
+
         } else if (this.stage == Stage.MAIN_MENU) {
             // Opción 1: "Solo estoy de paso"
+            int offset = this.playerOwnsAnotherTribe ? 8 : 0;
             this.addRenderableWidget(Button.builder(
                     Component.literal("Solo estoy de paso").withStyle(ChatFormatting.WHITE),
                     btn -> {
@@ -154,7 +203,7 @@ public class QueenDialogueScreen extends Screen {
                         ));
                         this.onClose();
                     }
-            ).bounds(centerX - btnWidth / 2, centerY - 10, btnWidth, btnHeight).build());
+            ).bounds(centerX - btnWidth / 2, centerY - 10 + offset, btnWidth, btnHeight).build());
 
             // Opción 2: Si ya eligió la ruta pacifista, ingresar directamente a los tradeos sin menú redundante
             if (this.pacifistRouteChosen) {
@@ -167,7 +216,7 @@ public class QueenDialogueScreen extends Screen {
                             ));
                             this.onClose();
                         }
-                ).bounds(centerX - btnWidth / 2, centerY + 18, btnWidth, btnHeight).build());
+                ).bounds(centerX - btnWidth / 2, centerY + 18 + offset, btnWidth, btnHeight).build());
             } else {
                 this.addRenderableWidget(Button.builder(
                         Component.literal("Esta tribu necesita un cambio").withStyle(ChatFormatting.GOLD),
@@ -175,7 +224,7 @@ public class QueenDialogueScreen extends Screen {
                             this.stage = Stage.TRIBE_CHANGE_SUBMENU;
                             this.init();
                         }
-                ).bounds(centerX - btnWidth / 2, centerY + 18, btnWidth, btnHeight).build());
+                ).bounds(centerX - btnWidth / 2, centerY + 18 + offset, btnWidth, btnHeight).build());
             }
         } else {
             if (!this.pacifistRouteChosen) {
@@ -191,9 +240,13 @@ public class QueenDialogueScreen extends Screen {
                         }
                 ).bounds(centerX - btnWidth / 2, centerY - 20, btnWidth, btnHeight).build());
 
-                // Opción B: "Ustedes necesitan más recursos para progresar" (Ruta Pasiva)
+                // Opción B: Ruta Pacífica adaptada
+                Component pacifistOption = this.playerOwnsAnotherTribe
+                        ? Component.literal("🌱 Vengo a ayudarlas así como ayudé a mi pueblo").withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD)
+                        : Component.literal("🌱 Ustedes necesitan más recursos para progresar").withStyle(ChatFormatting.GREEN);
+
                 this.addRenderableWidget(Button.builder(
-                        Component.literal("🌱 Ustedes necesitan más recursos para progresar").withStyle(ChatFormatting.GREEN),
+                        pacifistOption,
                         btn -> {
                             ClientPacketDistributor.sendToServer(new QueenDialogueActionPayload(
                                     this.queenEntityId,
@@ -241,10 +294,20 @@ public class QueenDialogueScreen extends Screen {
 
         int centerX = this.width / 2;
         int centerY = this.height / 2;
-        int cardWidth = 280;
-        int cardHeight = this.stage == Stage.RULER_GOVERNANCE ? 200 : 150;
+        int cardWidth = 300;
+        int cardHeight;
+        if (this.stage == Stage.RULER_GOVERNANCE) {
+            cardHeight = 200;
+        } else if (this.stage == Stage.DOWNED_JUDGMENT) {
+            cardHeight = 150;
+        } else if (this.stage == Stage.MAIN_MENU && this.playerOwnsAnotherTribe) {
+            cardHeight = 165;
+        } else {
+            cardHeight = 150;
+        }
+
         int cardLeft = centerX - cardWidth / 2;
-        int cardTop = this.stage == Stage.RULER_GOVERNANCE ? centerY - 105 : centerY - 65;
+        int cardTop = this.stage == Stage.RULER_GOVERNANCE ? centerY - 105 : centerY - (cardHeight / 2);
         int cardRight = cardLeft + cardWidth;
         int cardBottom = cardTop + cardHeight;
 
@@ -258,27 +321,65 @@ public class QueenDialogueScreen extends Screen {
         guiGraphicsExtractor.fill(cardRight - 2, cardTop, cardRight, cardBottom, 0xFFFFD700);
 
         // Título de la Reina
-        String header = this.stage == Stage.RULER_GOVERNANCE
-                ? "👑 " + this.queenTitle + " (Tribu " + this.tribeName + ")"
-                : "👑 " + this.queenTitle;
+        String header;
+        if (this.stage == Stage.RULER_GOVERNANCE) {
+            header = "👑 " + this.queenTitle + " (Tribu " + this.tribeName + ")";
+        } else if (this.stage == Stage.DOWNED_JUDGMENT) {
+            header = "👑 Juicio a la Reina Vencida: " + this.queenTitle;
+        } else {
+            header = "👑 " + this.queenTitle;
+        }
         int headerWidth = this.font.width(header);
         guiGraphicsExtractor.text(this.font, Component.literal(header), centerX - headerWidth / 2, cardTop + 10, 0xFFFFD700, true);
 
         // Subtítulo / Pregunta de la Reina
         String prompt;
-        if (this.stage == Stage.RULER_GOVERNANCE) {
+        if (this.stage == Stage.DOWNED_JUDGMENT) {
+            prompt = "La Reina yace a tu merced tras la batalla. ¿Cuál será su destino?";
+        } else if (this.stage == Stage.RULER_GOVERNANCE) {
             prompt = "¡A sus órdenes, mi Gobernador! ¿Qué ordenas a la tribu?";
         } else if (this.stage == Stage.MAIN_MENU) {
-            prompt = this.pacifistRouteChosen
-                    ? "Nuestra alianza avanza. ¿Qué asuntos te traen hoy?"
-                    : "¿Qué asuntos te traen ante mi presencia?";
+            if (this.playerOwnsAnotherTribe) {
+                prompt = "Esa aura es inconfundible... pero me sorprende que sea un humano quien la porta. Dime ¿acaso vienes a someter a mi pueblo?";
+            } else {
+                prompt = this.pacifistRouteChosen
+                        ? "Nuestra alianza avanza. ¿Qué asuntos te traen hoy?"
+                        : "¿Qué asuntos te traen ante mi presencia?";
+            }
         } else {
-            prompt = this.pacifistRouteChosen
-                    ? "¿Deseas entregar ofrendas para el progreso del pueblo?"
-                    : "¿Un cambio dices? ¿Qué pretendes para mi pueblo?";
+            if (this.playerOwnsAnotherTribe) {
+                prompt = "¿Qué pretendes entonces para mi pueblo, forastero?";
+            } else {
+                prompt = this.pacifistRouteChosen
+                        ? "¿Deseas entregar ofrendas para el progreso del pueblo?"
+                        : "¿Un cambio dices? ¿Qué pretendes para mi pueblo?";
+            }
         }
-        int promptWidth = this.font.width(prompt);
-        guiGraphicsExtractor.text(this.font, Component.literal(prompt), centerX - promptWidth / 2, cardTop + 26, 0xFFFFFFAA, true);
+
+        // Renderizado multilínea protegido contra desbordamiento
+        java.util.List<String> promptLines = new java.util.ArrayList<>();
+        if (this.font.width(prompt) > cardWidth - 24) {
+            String[] words = prompt.split(" ");
+            StringBuilder sb = new StringBuilder();
+            for (String w : words) {
+                if (sb.length() > 0 && this.font.width(sb + " " + w) > cardWidth - 24) {
+                    promptLines.add(sb.toString());
+                    sb = new StringBuilder(w);
+                } else {
+                    if (sb.length() > 0) sb.append(" ");
+                    sb.append(w);
+                }
+            }
+            if (sb.length() > 0) promptLines.add(sb.toString());
+        } else {
+            promptLines.add(prompt);
+        }
+
+        for (int i = 0; i < promptLines.size(); i++) {
+            String line = promptLines.get(i);
+            int promptWidth = this.font.width(line);
+            guiGraphicsExtractor.text(this.font, Component.literal(line), centerX - promptWidth / 2, cardTop + 25 + (i * 10), 0xFFFFFFAA, true);
+        }
 
         super.extractRenderState(guiGraphicsExtractor, mouseX, mouseY, partialTick);
     }
