@@ -4,6 +4,7 @@ import com.newcolleague.mod.NewColleagueMod;
 import com.newcolleague.mod.entity.KoboldGirlEntity;
 import com.newcolleague.mod.menu.KoboldGirlMenu;
 import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
@@ -26,6 +27,26 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
         this.titleLabelY = 6;
         this.inventoryLabelX = 8;
         this.inventoryLabelY = 138;
+    }
+
+    @Override
+    protected void init() {
+        super.init();
+        KoboldGirlEntity kobold = this.menu.getKoboldGirl();
+        if (kobold != null && this.minecraft != null && this.minecraft.player != null && kobold.isOwnedBy(this.minecraft.player)) {
+            int x = this.leftPos;
+            int y = this.topPos;
+            this.addRenderableWidget(Button.builder(
+                    Component.literal("✎ Renombrar").withStyle(ChatFormatting.YELLOW),
+                    btn -> {
+                        String currentName = kobold.getCustomGivenName();
+                        if (currentName.isEmpty()) {
+                            currentName = kobold.isAnyQueen() ? kobold.getQueenTitle() : kobold.getProfession().getDisplayName();
+                        }
+                        this.minecraft.setScreenAndShow(new RenameKoboldScreen(kobold.getId(), currentName, false));
+                    }
+            ).bounds(x + 102, y + 66, 66, 13).build());
+        }
     }
 
     @Override
@@ -92,6 +113,8 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
                     case GUARD -> 0xFF55AAFF;    // Azul férreo para Guardia
                     case VIGILANT -> 0xFF55FFFF; // Cian para Vigilante
                     case HUNTER -> 0xFFFFAA44;   // Naranja para Cazadora
+                    case BUILDER -> 0xFFFFD700;  // Dorado para Constructora
+                    case SORCERESS -> 0xFFFF55FF;// Púrpura / Rosa para Hechicera
                     default -> 0xFFEEDD88;       // Amarillo suave para Súbdita estándar
                 };
             }
@@ -151,6 +174,8 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
                         case GUARD -> ChatFormatting.BLUE;
                         case VIGILANT -> ChatFormatting.AQUA;
                         case HUNTER -> ChatFormatting.GOLD;
+                        case BUILDER -> ChatFormatting.YELLOW;
+                        case SORCERESS -> ChatFormatting.LIGHT_PURPLE;
                         default -> ChatFormatting.GRAY;
                     };
                     roleLine = Component.literal("Profesión: " + prof.getDisplayName()).withStyle(profFormat);
@@ -167,6 +192,8 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
                         case GUARD -> "• Espadas/mazos y escudos\n• +5% Daño Cuerpo a Cuerpo\n• Defiende a la tribu";
                         case VIGILANT -> "• Arcos y ballestas con munición\n• +5% Daño a Distancia\n• Defiende a la tribu";
                         case HUNTER -> "• Caza animales con hachas/arcos\n• Cocina carne en fogatas\n• Pacífica (autodefensa)";
+                        case BUILDER -> "• Acondiciona el terreno de aldea\n• Construye proyectos y edificios\n• Pacífica (autodefensa)";
+                        case SORCERESS -> "• Canaliza magia arcana ancestral\n• Rayos, Colmillos y Fuego\n• Defiende a la tribu";
                         default -> "";
                     };
                     if (!details.isEmpty()) {

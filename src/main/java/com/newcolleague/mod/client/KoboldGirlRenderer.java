@@ -13,6 +13,7 @@ import org.jspecify.annotations.Nullable;
 public class KoboldGirlRenderer extends GeoEntityRenderer<KoboldGirlEntity, LivingEntityRenderState> {
 
     public static final DataTicket<Boolean> IS_QUEEN = DataTicket.create("is_queen", Boolean.class);
+    public static final DataTicket<Boolean> IS_REINCARNATING = DataTicket.create("is_reincarnating", Boolean.class);
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     public KoboldGirlRenderer(EntityRendererProvider.Context renderManager) {
@@ -26,6 +27,7 @@ public class KoboldGirlRenderer extends GeoEntityRenderer<KoboldGirlEntity, Livi
         super.addRenderData(animatable, relatedObject, renderState, partialTick);
         if ((Object) renderState instanceof com.geckolib.renderer.base.GeoRenderState geoState) {
             geoState.addGeckolibData(IS_QUEEN, animatable.isAnyQueen());
+            geoState.addGeckolibData(IS_REINCARNATING, animatable.isReincarnating());
         }
     }
 
@@ -57,8 +59,15 @@ public class KoboldGirlRenderer extends GeoEntityRenderer<KoboldGirlEntity, Livi
     @Override
     public void scaleModelForRender(RenderPassInfo renderPassInfo, float widthScale, float heightScale) {
         boolean isQueen = false;
+        boolean isReincarnating = false;
         if (renderPassInfo.renderState() instanceof com.geckolib.renderer.base.GeoRenderState geoState) {
             isQueen = geoState.getOrDefaultGeckolibData(IS_QUEEN, false);
+            isReincarnating = geoState.getOrDefaultGeckolibData(IS_REINCARNATING, false);
+        }
+        if (isReincarnating) {
+            float jx = (float) ((Math.random() - 0.5F) * 0.08F);
+            float jz = (float) ((Math.random() - 0.5F) * 0.08F);
+            renderPassInfo.poseStack().translate(jx, 0.0F, jz);
         }
         float scale = isQueen ? 1.05F : 1.0F;
         super.scaleModelForRender(renderPassInfo, widthScale * scale, heightScale * scale);

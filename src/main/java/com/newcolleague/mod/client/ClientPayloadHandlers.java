@@ -13,7 +13,9 @@ public class ClientPayloadHandlers {
                     payload.queenTitle(),
                     payload.tribeName(),
                     payload.pacifistRouteChosen(),
-                    payload.isRuler()
+                    payload.isRuler(),
+                    payload.playerOwnsAnotherTribe(),
+                    payload.isDownedJudgment()
             ));
         }
     }

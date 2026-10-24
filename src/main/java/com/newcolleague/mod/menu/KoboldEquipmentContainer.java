@@ -1,15 +1,15 @@
 package com.newcolleague.mod.menu;
 
-import com.newcolleague.mod.entity.KoboldGirlEntity;
+import com.newcolleague.mod.entity.AbstractTribalEntity;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
 public class KoboldEquipmentContainer implements Container {
-    private final KoboldGirlEntity kobold;
+    private final AbstractTribalEntity kobold;
 
-    public KoboldEquipmentContainer(KoboldGirlEntity kobold) {
+    public KoboldEquipmentContainer(AbstractTribalEntity kobold) {
         this.kobold = kobold;
     }
 
@@ -80,7 +80,7 @@ public class KoboldEquipmentContainer implements Container {
 
     @Override
     public boolean stillValid(Player player) {
-        return this.kobold.isAlive() && this.kobold.distanceToSqr(player) < 64.0D;
+        return this.kobold.isAlive() && this.kobold.distanceTo(player) < 8.0F;
     }
 
     @Override

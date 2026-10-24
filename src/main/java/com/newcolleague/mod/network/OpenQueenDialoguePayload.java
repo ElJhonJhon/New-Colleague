@@ -8,7 +8,19 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-public record OpenQueenDialoguePayload(int queenEntityId, String queenTitle, String tribeName, boolean pacifistRouteChosen, boolean isRuler) implements CustomPacketPayload {
+public record OpenQueenDialoguePayload(
+        int queenEntityId,
+        String queenTitle,
+        String tribeName,
+        boolean pacifistRouteChosen,
+        boolean isRuler,
+        boolean playerOwnsAnotherTribe,
+        boolean isDownedJudgment
+) implements CustomPacketPayload {
+
+    public OpenQueenDialoguePayload(int queenEntityId, String queenTitle, String tribeName, boolean pacifistRouteChosen, boolean isRuler) {
+        this(queenEntityId, queenTitle, tribeName, pacifistRouteChosen, isRuler, false, false);
+    }
 
     public static final Type<OpenQueenDialoguePayload> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(NewColleagueMod.MODID, "open_queen_dialogue"));
@@ -20,6 +32,8 @@ public record OpenQueenDialoguePayload(int queenEntityId, String queenTitle, Str
                     ByteBufCodecs.STRING_UTF8, OpenQueenDialoguePayload::tribeName,
                     ByteBufCodecs.BOOL, OpenQueenDialoguePayload::pacifistRouteChosen,
                     ByteBufCodecs.BOOL, OpenQueenDialoguePayload::isRuler,
+                    ByteBufCodecs.BOOL, OpenQueenDialoguePayload::playerOwnsAnotherTribe,
+                    ByteBufCodecs.BOOL, OpenQueenDialoguePayload::isDownedJudgment,
                     OpenQueenDialoguePayload::new
             );
 
