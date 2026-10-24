@@ -1,5 +1,5 @@
 package com.newcolleague.mod.entity;
-
+//todo esto da pase a trabajar mejor con futuras especies y no buscar a lo loco acciones en un solo documento
 import com.geckolib.animatable.GeoEntity;
 import com.geckolib.animatable.instance.AnimatableInstanceCache;
 import com.geckolib.animatable.manager.AnimatableManager;
