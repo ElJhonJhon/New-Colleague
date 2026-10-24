@@ -1,7 +1,7 @@
 package com.newcolleague.mod.entity.ai;
 
 import com.newcolleague.mod.entity.KoboldGirlEntity;
-import com.newcolleague.mod.entity.KoboldGirlEntity.KoboldProfession;
+import com.newcolleague.mod.entity.AbstractTribalEntity.KoboldProfession;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;

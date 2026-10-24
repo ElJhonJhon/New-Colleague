@@ -1,7 +1,7 @@
 package com.newcolleague.mod.village;
 
-import com.newcolleague.mod.entity.KoboldGirlEntity;
-import com.newcolleague.mod.entity.KoboldGirlEntity.KoboldProfession;
+import com.newcolleague.mod.entity.AbstractTribalEntity;
+import com.newcolleague.mod.entity.AbstractTribalEntity.KoboldProfession;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
@@ -12,10 +12,11 @@ import java.util.List;
 /**
  * El Cerebro de la Reina: Administrador dinámico de reasignación periódica de roles
  * según las emergencias y métricas del asentamiento tribal.
+ * Funciona para cualquier entidad tribal (Kobold, Goblin, Orc, etc.).
  */
 public class QueenRoleManager {
 
-    public static void evaluateAndAssignRoles(KoboldGirlEntity queen, List<KoboldGirlEntity> tribeMembers, VillageStorage storage) {
+    public static void evaluateAndAssignRoles(AbstractTribalEntity queen, List<AbstractTribalEntity> tribeMembers, VillageStorage storage) {
         if (!queen.isAnyQueen() || !(queen.level() instanceof ServerLevel sl)) return;
 
         int foodCount = storage.getTotalFood();
@@ -27,11 +28,11 @@ public class QueenRoleManager {
         int hunterCount = 0;
         int defenderCount = 0;
         int minerCount = 0;
-        List<KoboldGirlEntity> civilians = new ArrayList<>();
-        List<KoboldGirlEntity> hunters = new ArrayList<>();
-        List<KoboldGirlEntity> defenders = new ArrayList<>();
+        List<AbstractTribalEntity> civilians = new ArrayList<>();
+        List<AbstractTribalEntity> hunters = new ArrayList<>();
+        List<AbstractTribalEntity> defenders = new ArrayList<>();
 
-        for (KoboldGirlEntity member : tribeMembers) {
+        for (AbstractTribalEntity member : tribeMembers) {
             if (member == queen) continue;
             switch (member.getProfession()) {
                 case BUILDER -> builderCount++;
@@ -53,7 +54,7 @@ public class QueenRoleManager {
         // Prioridad 1: Defensa Perimetral
         // Al caer la noche o detectar mobs hostiles en un radio de 32 bloques, promociona temporalmente civiles o cazadoras a GUARD o VIGILANT
         if (isNightOrThreatened && defenderCount < 2) {
-            KoboldGirlEntity recruit = null;
+            AbstractTribalEntity recruit = null;
             if (!civilians.isEmpty()) {
                 recruit = civilians.remove(0);
             } else if (!hunters.isEmpty() && hunterCount > 1) {
@@ -74,7 +75,7 @@ public class QueenRoleManager {
         // Normalización de Guardias en tiempo de paz diurno: Si hay más de 2 guardias y se necesita mano de obra
         if (!isNightOrThreatened && defenderCount > 2 && !defenders.isEmpty()) {
             if (hasActiveProject && builderCount < 2) {
-                KoboldGirlEntity worker = defenders.remove(0);
+                AbstractTribalEntity worker = defenders.remove(0);
                 worker.setProfession(KoboldProfession.BUILDER);
                 sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, worker.getX(), worker.getY() + 1.2D, worker.getZ(), 6, 0.2D, 0.2D, 0.2D, 0.05D);
                 worker.playSound(SoundEvents.STONE_PLACE, 1.0F, 1.0F);
@@ -86,7 +87,7 @@ public class QueenRoleManager {
         // Prioridad 2: Emergencia de Alimento
         // Si la comida total en los cofres es < 12, convierte a las civiles en FARMER o HUNTER
         if (foodCount < 12 && (farmerCount + hunterCount) < 3 && !civilians.isEmpty()) {
-            KoboldGirlEntity recruit = civilians.remove(0);
+            AbstractTribalEntity recruit = civilians.remove(0);
             KoboldProfession newProf = (farmerCount <= hunterCount) ? KoboldProfession.FARMER : KoboldProfession.HUNTER;
             recruit.setProfession(newProf);
             sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, recruit.getX(), recruit.getY() + 1.2D, recruit.getZ(), 8, 0.2D, 0.2D, 0.2D, 0.05D);
@@ -98,7 +99,7 @@ public class QueenRoleManager {
         // Prioridad 3: Emergencia de Infraestructura
         // Si hay un blueprint activo (como carpa o torre) y hay menos de 2 constructoras
         if (hasActiveProject && builderCount < 2 && !civilians.isEmpty()) {
-            KoboldGirlEntity recruit = civilians.remove(0);
+            AbstractTribalEntity recruit = civilians.remove(0);
             recruit.setProfession(KoboldProfession.BUILDER);
             sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, recruit.getX(), recruit.getY() + 1.2D, recruit.getZ(), 8, 0.2D, 0.2D, 0.2D, 0.05D);
             recruit.playSound(SoundEvents.STONE_PLACE, 1.0F, 1.0F);
@@ -109,7 +110,7 @@ public class QueenRoleManager {
         // Prioridad 4: Apoyo Minero
         // Si hay proyectos de construcción y falta extracción de piedra o minerales
         if (hasActiveProject && minerCount < 1 && civilians.size() >= 2) {
-            KoboldGirlEntity recruit = civilians.remove(0);
+            AbstractTribalEntity recruit = civilians.remove(0);
             recruit.setProfession(KoboldProfession.MINER);
             sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, recruit.getX(), recruit.getY() + 1.2D, recruit.getZ(), 8, 0.2D, 0.2D, 0.2D, 0.05D);
             recruit.playSound(SoundEvents.STONE_BREAK, 1.0F, 1.0F);
@@ -118,7 +119,7 @@ public class QueenRoleManager {
         }
     }
 
-    public static void evaluateAndAssignRoles(KoboldGirlEntity queen, List<KoboldGirlEntity> tribeMembers) {
+    public static void evaluateAndAssignRoles(AbstractTribalEntity queen, List<AbstractTribalEntity> tribeMembers) {
         evaluateAndAssignRoles(queen, tribeMembers, new VillageStorage(queen, 32));
     }
 }

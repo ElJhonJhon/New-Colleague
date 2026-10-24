@@ -1,5 +1,6 @@
 package com.newcolleague.mod.menu;
 
+import com.newcolleague.mod.entity.AbstractTribalEntity;
 import com.newcolleague.mod.entity.KoboldGirlEntity;
 import com.newcolleague.mod.entity.ModEntities;
 import net.minecraft.core.component.DataComponents;
@@ -12,7 +13,6 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.ArmorSlot;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -22,7 +22,7 @@ import net.minecraft.world.level.Level;
 
 public class KoboldGirlMenu extends AbstractContainerMenu {
 
-    private final KoboldGirlEntity kobold;
+    private final AbstractTribalEntity kobold;
     private final KoboldEquipmentContainer equipContainer;
 
     // Constructor del lado del cliente llamado por IContainerFactory
@@ -31,7 +31,7 @@ public class KoboldGirlMenu extends AbstractContainerMenu {
     }
 
     // Constructor del lado del servidor
-    public KoboldGirlMenu(int containerId, Inventory playerInventory, KoboldGirlEntity kobold) {
+    public KoboldGirlMenu(int containerId, Inventory playerInventory, AbstractTribalEntity kobold) {
         super(ModMenus.KOBOLD_GIRL_MENU.get(), containerId);
         this.kobold = kobold != null ? kobold : new KoboldGirlEntity(ModEntities.KOBOLD_GIRL.get(), playerInventory.player.level());
         this.equipContainer = new KoboldEquipmentContainer(this.kobold);
@@ -83,16 +83,20 @@ public class KoboldGirlMenu extends AbstractContainerMenu {
         }
     }
 
-    private static KoboldGirlEntity getClientKoboldEntity(Level level, int entityId) {
+    private static AbstractTribalEntity getClientKoboldEntity(Level level, int entityId) {
         Entity entity = level.getEntity(entityId);
-        if (entity instanceof KoboldGirlEntity koboldEntity) {
-            return koboldEntity;
+        if (entity instanceof AbstractTribalEntity tribalEntity) {
+            return tribalEntity;
         }
         return null;
     }
 
-    public KoboldGirlEntity getKoboldGirl() {
+    public AbstractTribalEntity getTribalEntity() {
         return this.kobold;
+    }
+
+    public KoboldGirlEntity getKoboldGirl() {
+        return this.kobold instanceof KoboldGirlEntity k ? k : null;
     }
 
     @Override
@@ -144,7 +148,7 @@ public class KoboldGirlMenu extends AbstractContainerMenu {
                 }
 
                 // 3. Si es arma, intentar colocar en mano principal (Slot 4) si está libre
-                if (!placedInArmor && KoboldGirlEntity.isWeapon(itemstack1)) {
+                if (!placedInArmor && AbstractTribalEntity.isWeapon(itemstack1)) {
                     if (!this.slots.get(4).hasItem()) {
                         if (this.moveItemStackTo(itemstack1, 4, 5, false)) {
                             placedInArmor = true;
@@ -174,5 +178,33 @@ public class KoboldGirlMenu extends AbstractContainerMenu {
         }
 
         return itemstack;
+    }
+
+    private static class ArmorSlot extends Slot {
+        private final AbstractTribalEntity mob;
+        private final EquipmentSlot slot;
+        private final Identifier emptyIcon;
+
+        public ArmorSlot(Container container, AbstractTribalEntity mob, EquipmentSlot slot, int index, int x, int y, Identifier emptyIcon) {
+            super(container, index, x, y);
+            this.mob = mob;
+            this.slot = slot;
+            this.emptyIcon = emptyIcon;
+        }
+
+        @Override
+        public int getMaxStackSize() {
+            return 1;
+        }
+
+        @Override
+        public boolean mayPlace(ItemStack stack) {
+            return this.mob.fitsArmorSlot(stack, this.slot);
+        }
+
+        @Override
+        public Identifier getNoItemIcon() {
+            return this.emptyIcon;
+        }
     }
 }

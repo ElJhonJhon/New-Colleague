@@ -1,6 +1,6 @@
 package com.newcolleague.mod.village;
 
-import com.newcolleague.mod.entity.KoboldGirlEntity;
+import com.newcolleague.mod.entity.AbstractTribalEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
@@ -13,17 +13,18 @@ import java.util.List;
 
 /**
  * Representa la gestión y métricas unificadas del almacén comunal de la tribu.
+ * Funciona para cualquier especie tribal.
  */
 public class VillageStorage {
-    private final KoboldGirlEntity queen;
+    private final AbstractTribalEntity queen;
     private final int radius;
 
-    public VillageStorage(KoboldGirlEntity queen, int radius) {
+    public VillageStorage(AbstractTribalEntity queen, int radius) {
         this.queen = queen;
         this.radius = radius;
     }
 
-    public VillageStorage(KoboldGirlEntity queen) {
+    public VillageStorage(AbstractTribalEntity queen) {
         this(queen, 32);
     }
 
@@ -37,7 +38,7 @@ public class VillageStorage {
     }
 
     public List<BlockPos> getNearbyChests() {
-        return KoboldGirlEntity.findNearbyUniqueChests(this.queen.level(), this.queen.blockPosition(), this.radius, 6);
+        return AbstractTribalEntity.findNearbyUniqueChests(this.queen.level(), this.queen.blockPosition(), this.radius, 6);
     }
 
     public int countItemInChests(Item item) {
@@ -45,7 +46,7 @@ public class VillageStorage {
         int total = 0;
         List<BlockPos> chests = this.getNearbyChests();
         for (BlockPos pos : chests) {
-            Container c = KoboldGirlEntity.getChestContainer(level, pos);
+            Container c = AbstractTribalEntity.getChestContainer(level, pos);
             if (c == null || c.isEmpty()) continue;
             for (int i = 0; i < c.getContainerSize(); i++) {
                 ItemStack st = c.getItem(i);
@@ -61,7 +62,7 @@ public class VillageStorage {
         Level level = this.queen.level();
         List<BlockPos> chests = this.getNearbyChests();
         for (BlockPos pos : chests) {
-            Container c = KoboldGirlEntity.getChestContainer(level, pos);
+            Container c = AbstractTribalEntity.getChestContainer(level, pos);
             if (c == null || c.isEmpty()) continue;
             for (int i = 0; i < c.getContainerSize(); i++) {
                 ItemStack st = c.getItem(i);

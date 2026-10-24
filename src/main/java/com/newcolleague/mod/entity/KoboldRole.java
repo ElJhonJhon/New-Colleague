@@ -2,7 +2,7 @@ package com.newcolleague.mod.entity;
 
 /**
  * Enumerador de compatibilidad para roles de Kobold Girls.
- * Mapea directamente a KoboldGirlEntity.KoboldProfession.
+ * Mapea directamente a AbstractTribalEntity.KoboldProfession.
  */
 public enum KoboldRole {
     NONE,
@@ -16,11 +16,11 @@ public enum KoboldRole {
     MINER,
     SORCERESS;
 
-    public KoboldGirlEntity.KoboldProfession toProfession() {
-        return KoboldGirlEntity.KoboldProfession.valueOf(this.name());
+    public AbstractTribalEntity.KoboldProfession toProfession() {
+        return AbstractTribalEntity.KoboldProfession.valueOf(this.name());
     }
 
-    public static KoboldRole fromProfession(KoboldGirlEntity.KoboldProfession prof) {
+    public static KoboldRole fromProfession(AbstractTribalEntity.KoboldProfession prof) {
         if (prof == null) return NONE;
         try {
             return valueOf(prof.name());
