@@ -2,6 +2,7 @@ package com.newcolleague.mod.entity.ai;
 
 import com.newcolleague.mod.entity.KoboldGirlEntity;
 import com.newcolleague.mod.entity.AbstractTribalEntity.CommandStance;
+import com.newcolleague.mod.entity.AbstractTribalEntity.KoboldProfession;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.animal.Animal;
 
@@ -27,6 +28,9 @@ public class KoboldHerdingGoal extends Goal {
     public boolean canUse() {
         if (this.kobold.isSleeping() || this.kobold.isInPowerStruggle()) return false;
         if (this.kobold.getTarget() != null) return false;
+        if (this.kobold.getProfession() != KoboldProfession.FARMER && this.kobold.getProfession() != KoboldProfession.HUNTER && !this.kobold.isAnyQueen()) {
+            return false;
+        }
         if (this.feedCooldown > 0) {
             this.feedCooldown--;
             return false;
@@ -34,7 +38,7 @@ public class KoboldHerdingGoal extends Goal {
         if (this.kobold.isOwned() && this.kobold.getCommandStance() != CommandStance.WORK) {
             return false;
         }
-        if (!this.kobold.isMorningWorkTime()) {
+        if (!this.kobold.isWorkScheduleTime() || this.kobold.isSleepTime()) {
             return false;
         }
 

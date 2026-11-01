@@ -161,11 +161,17 @@ public class KoboldScoutGoal extends Goal {
     }
 
     private void pickNextExplorationTarget(Level level) {
+        BlockPos center = this.kobold.getCampCenterPos();
+        if (center == null) {
+            KoboldGirlEntity queen = this.kobold.getTribeQueen();
+            center = (queen != null && queen.isAlive()) ? queen.blockPosition() : this.kobold.blockPosition();
+        }
+
         RandomSource rand = this.kobold.getRandom();
         double angle = rand.nextDouble() * 2.0D * Math.PI;
-        double dist = 24.0D + rand.nextDouble() * 24.0D;
-        int tx = this.kobold.getBlockX() + (int)(Math.cos(angle) * dist);
-        int tz = this.kobold.getBlockZ() + (int)(Math.sin(angle) * dist);
+        double dist = 16.0D + rand.nextDouble() * 24.0D; // Radio de 16 a 40 bloques del centro de la aldea
+        int tx = center.getX() + (int)(Math.cos(angle) * dist);
+        int tz = center.getZ() + (int)(Math.sin(angle) * dist);
         int ty = level.getHeight(Heightmap.Types.WORLD_SURFACE, tx, tz);
 
         BlockPos target = new BlockPos(tx, ty, tz);

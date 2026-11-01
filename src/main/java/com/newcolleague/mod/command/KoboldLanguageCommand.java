@@ -1,11 +1,14 @@
 package com.newcolleague.mod.command;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.newcolleague.mod.NewColleagueMod;
 import com.newcolleague.mod.entity.KoboldGirlEntity;
+import com.newcolleague.mod.entity.KoboldTribeVariant;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -16,9 +19,12 @@ import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.AABB;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
+
+import java.util.List;
 
 @EventBusSubscriber(modid = NewColleagueMod.MODID)
 public class KoboldLanguageCommand {
@@ -49,7 +55,17 @@ public class KoboldLanguageCommand {
                 .then(Commands.literal("reset_all")
                         .executes(ctx -> executeResetAll(ctx, ctx.getSource().getPlayerOrException()))
                         .then(Commands.argument("target", EntityArgument.player())
-                                .executes(ctx -> executeResetAll(ctx, EntityArgument.getPlayer(ctx, "target")))));
+                                .executes(ctx -> executeResetAll(ctx, EntityArgument.getPlayer(ctx, "target")))))
+                .then(Commands.literal("variant")
+                        .then(Commands.argument("id", IntegerArgumentType.integer(0, KoboldTribeVariant.getTotalVariants() - 1))
+                                .executes(ctx -> executeSetVariant(ctx, IntegerArgumentType.getInteger(ctx, "id")))))
+                .then(Commands.literal("tribe_variant")
+                        .then(Commands.argument("id", IntegerArgumentType.integer(0, KoboldTribeVariant.getTotalVariants() - 1))
+                                .executes(ctx -> executeSetTribeVariant(ctx, IntegerArgumentType.getInteger(ctx, "id")))))
+                .then(Commands.literal("survivor")
+                        .executes(ctx -> executeSetSurvivor(ctx, true))
+                        .then(Commands.argument("enabled", BoolArgumentType.bool())
+                                .executes(ctx -> executeSetSurvivor(ctx, BoolArgumentType.getBool(ctx, "enabled")))));
 
         dispatcher.register(koboldCmd);
 
@@ -160,5 +176,118 @@ public class KoboldLanguageCommand {
         int r1 = executeResetLanguage(ctx, target);
         int r2 = executeResetTribe(ctx, 128.0D);
         return r1 + r2;
+    }
+
+    private static int executeSetVariant(CommandContext<CommandSourceStack> ctx, int variantId) {
+        CommandSourceStack source = ctx.getSource();
+        if (!checkCreativeOrOp(source)) return 0;
+
+        ServerPlayer player = source.getPlayer();
+        if (player == null) return 0;
+
+        AABB box = player.getBoundingBox().inflate(12.0D);
+        List<KoboldGirlEntity> nearby = player.level().getEntitiesOfClass(KoboldGirlEntity.class, box, Entity::isAlive);
+
+        KoboldGirlEntity closest = null;
+        double closestDist = Double.MAX_VALUE;
+        for (KoboldGirlEntity k : nearby) {
+            double d = k.distanceToSqr(player);
+            if (d < closestDist) {
+                closestDist = d;
+                closest = k;
+            }
+        }
+
+        if (closest != null) {
+            closest.setTribeVariant(variantId);
+            KoboldTribeVariant varEnum = KoboldTribeVariant.byId(variantId);
+            KoboldGirlEntity targetKobold = closest;
+            source.sendSuccess(() -> Component.literal("🎨 Variante cambiada a ID " + variantId + " (" + varEnum.getDisplayName() + ") para: " + targetKobold.getDisplayNameWithTribe())
+                    .withStyle(ChatFormatting.GREEN), true);
+            return 1;
+        } else {
+            source.sendFailure(Component.literal("No hay ninguna Kobold Girl cerca (radio 12 bloques).")
+                    .withStyle(ChatFormatting.YELLOW));
+            return 0;
+        }
+    }
+
+    private static int executeSetTribeVariant(CommandContext<CommandSourceStack> ctx, int variantId) {
+        CommandSourceStack source = ctx.getSource();
+        if (!checkCreativeOrOp(source)) return 0;
+
+        ServerPlayer player = source.getPlayer();
+        if (player == null) return 0;
+
+        AABB box = player.getBoundingBox().inflate(48.0D);
+        List<KoboldGirlEntity> nearby = player.level().getEntitiesOfClass(KoboldGirlEntity.class, box, Entity::isAlive);
+
+        KoboldGirlEntity closest = null;
+        double closestDist = Double.MAX_VALUE;
+        for (KoboldGirlEntity k : nearby) {
+            double d = k.distanceToSqr(player);
+            if (d < closestDist) {
+                closestDist = d;
+                closest = k;
+            }
+        }
+
+        if (closest == null) {
+            source.sendFailure(Component.literal("No se encontraron Kobold Girls cerca en un radio de 48 bloques.")
+                    .withStyle(ChatFormatting.YELLOW));
+            return 0;
+        }
+
+        String targetTribe = closest.getTribeName();
+        int count = 0;
+        for (KoboldGirlEntity k : nearby) {
+            if (targetTribe.isEmpty() || k.getTribeName().equalsIgnoreCase(targetTribe)) {
+                k.setTribeVariant(variantId);
+                count++;
+            }
+        }
+
+        KoboldTribeVariant varEnum = KoboldTribeVariant.byId(variantId);
+        final int affected = count;
+        final String tribeNameDisplay = targetTribe.isEmpty() ? "Sin Tribu" : targetTribe;
+        source.sendSuccess(() -> Component.literal("🎨 Se cambió la variante a ID " + variantId + " (" + varEnum.getDisplayName() + ") para " + affected + " miembro(s) de la tribu [" + tribeNameDisplay + "].")
+                .withStyle(ChatFormatting.GREEN), true);
+        return count;
+    }
+
+    private static int executeSetSurvivor(CommandContext<CommandSourceStack> ctx, boolean enabled) {
+        CommandSourceStack source = ctx.getSource();
+        if (!checkCreativeOrOp(source)) return 0;
+
+        ServerPlayer player = source.getPlayer();
+        if (player == null) return 0;
+
+        AABB box = player.getBoundingBox().inflate(12.0D);
+        List<KoboldGirlEntity> nearby = player.level().getEntitiesOfClass(KoboldGirlEntity.class, box, Entity::isAlive);
+
+        KoboldGirlEntity closest = null;
+        double closestDist = Double.MAX_VALUE;
+        for (KoboldGirlEntity k : nearby) {
+            double d = k.distanceToSqr(player);
+            if (d < closestDist) {
+                closestDist = d;
+                closest = k;
+            }
+        }
+
+        if (closest != null) {
+            closest.setSurvivorQueen(enabled);
+            if (enabled) {
+                closest.setQueen(false);
+            }
+            KoboldGirlEntity targetKobold = closest;
+            source.sendSuccess(() -> Component.literal("⚔️ Estado de Reina Sobreviviente establecido en [" + enabled + "] para: " + targetKobold.getDisplayNameWithTribe())
+                    .withStyle(ChatFormatting.GOLD), true);
+            return 1;
+        } else {
+            source.sendFailure(Component.literal("No hay ninguna Kobold Girl cerca (radio 12 bloques).")
+                    .withStyle(ChatFormatting.YELLOW));
+            return 0;
+        }
     }
 }

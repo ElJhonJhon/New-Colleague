@@ -14,6 +14,10 @@ public class ModItems {
             ITEMS.registerItem("kobold_girl_spawn_egg",
                     properties -> new SpawnEggItem(properties.spawnEgg(ModEntities.KOBOLD_GIRL.get())));
 
+    public static final DeferredItem<SpawnEggItem> SPIKE_BEAST_SPAWN_EGG =
+            ITEMS.registerItem("spike_beast_spawn_egg",
+                    properties -> new SpawnEggItem(properties.spawnEgg(ModEntities.SPIKE_BEAST.get())));
+
     public static final DeferredItem<BaculoItem> BACULO =
             ITEMS.registerItem("baculo", BaculoItem::new, properties -> properties
                     .durability(250)

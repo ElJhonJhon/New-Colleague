@@ -24,19 +24,25 @@ public class QueenRoleManager {
         boolean isNightOrThreatened = queen.isNightTime() || queen.hasNearbyHostiles(sl, 32.0D);
 
         int builderCount = 0;
+        int carpenterCount = 0;
         int farmerCount = 0;
         int hunterCount = 0;
         int defenderCount = 0;
         int minerCount = 0;
         List<AbstractTribalEntity> civilians = new ArrayList<>();
         List<AbstractTribalEntity> hunters = new ArrayList<>();
+        List<AbstractTribalEntity> farmers = new ArrayList<>();
         List<AbstractTribalEntity> defenders = new ArrayList<>();
 
         for (AbstractTribalEntity member : tribeMembers) {
             if (member == queen) continue;
             switch (member.getProfession()) {
                 case BUILDER -> builderCount++;
-                case FARMER -> farmerCount++;
+                case CARPENTER -> carpenterCount++;
+                case FARMER -> {
+                    farmerCount++;
+                    farmers.add(member);
+                }
                 case HUNTER -> {
                     hunterCount++;
                     hunters.add(member);
@@ -84,7 +90,40 @@ public class QueenRoleManager {
             }
         }
 
-        // Prioridad 2: Emergencia de Alimento
+        // Prioridad 2: Emergencia de Infraestructura
+        // Si hay un blueprint activo (campamento, carpa, granja, etc.) y no hay constructoras suficientes
+        // Se evalúa asegurando que la aldea nunca se quede con 0 constructoras
+        if (hasActiveProject && builderCount < 2) {
+            AbstractTribalEntity recruit = null;
+            if (!civilians.isEmpty()) {
+                recruit = civilians.remove(0);
+            } else if (builderCount == 0) {
+                // Si no hay constructoras, reasignar temporalmente de cazadoras, granjeras o guardias sobrantes
+                if (!hunters.isEmpty() && (hunterCount >= farmerCount || farmerCount <= 1)) {
+                    recruit = hunters.remove(0);
+                } else if (!farmers.isEmpty()) {
+                    recruit = farmers.remove(0);
+                } else if (!defenders.isEmpty() && !isNightOrThreatened && defenderCount > 1) {
+                    recruit = defenders.remove(0);
+                }
+            } else if (builderCount == 1 && (farmerCount + hunterCount) >= 3) {
+                if (!hunters.isEmpty() && hunterCount >= farmerCount) {
+                    recruit = hunters.remove(0);
+                } else if (!farmers.isEmpty()) {
+                    recruit = farmers.remove(0);
+                }
+            }
+
+            if (recruit != null) {
+                recruit.setProfession(KoboldProfession.BUILDER);
+                sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, recruit.getX(), recruit.getY() + 1.2D, recruit.getZ(), 8, 0.2D, 0.2D, 0.2D, 0.05D);
+                recruit.playSound(SoundEvents.STONE_PLACE, 1.0F, 1.0F);
+                queen.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.0F);
+                return;
+            }
+        }
+
+        // Prioridad 3: Emergencia de Alimento
         // Si la comida total en los cofres es < 12, convierte a las civiles en FARMER o HUNTER
         if (foodCount < 12 && (farmerCount + hunterCount) < 3 && !civilians.isEmpty()) {
             AbstractTribalEntity recruit = civilians.remove(0);
@@ -96,24 +135,24 @@ public class QueenRoleManager {
             return;
         }
 
-        // Prioridad 3: Emergencia de Infraestructura
-        // Si hay un blueprint activo (como carpa o torre) y hay menos de 2 constructoras
-        if (hasActiveProject && builderCount < 2 && !civilians.isEmpty()) {
-            AbstractTribalEntity recruit = civilians.remove(0);
-            recruit.setProfession(KoboldProfession.BUILDER);
-            sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, recruit.getX(), recruit.getY() + 1.2D, recruit.getZ(), 8, 0.2D, 0.2D, 0.2D, 0.05D);
-            recruit.playSound(SoundEvents.STONE_PLACE, 1.0F, 1.0F);
-            queen.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.0F);
-            return;
-        }
-
         // Prioridad 4: Apoyo Minero
         // Si hay proyectos de construcción y falta extracción de piedra o minerales
-        if (hasActiveProject && minerCount < 1 && civilians.size() >= 2) {
+        if (hasActiveProject && minerCount < 1 && !civilians.isEmpty()) {
             AbstractTribalEntity recruit = civilians.remove(0);
             recruit.setProfession(KoboldProfession.MINER);
             sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, recruit.getX(), recruit.getY() + 1.2D, recruit.getZ(), 8, 0.2D, 0.2D, 0.2D, 0.05D);
             recruit.playSound(SoundEvents.STONE_BREAK, 1.0F, 1.0F);
+            queen.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.0F);
+            return;
+        }
+
+        // Prioridad 5: Apoyo de Carpintería y Silvicultura
+        // Si hay proyectos de construcción y falta extracción/plantación de madera
+        if (hasActiveProject && carpenterCount < 1 && !civilians.isEmpty()) {
+            AbstractTribalEntity recruit = civilians.remove(0);
+            recruit.setProfession(KoboldProfession.CARPENTER);
+            sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, recruit.getX(), recruit.getY() + 1.2D, recruit.getZ(), 8, 0.2D, 0.2D, 0.2D, 0.05D);
+            recruit.playSound(SoundEvents.WOOD_BREAK, 1.0F, 1.0F);
             queen.playSound(SoundEvents.VILLAGER_YES, 1.0F, 1.0F);
             return;
         }

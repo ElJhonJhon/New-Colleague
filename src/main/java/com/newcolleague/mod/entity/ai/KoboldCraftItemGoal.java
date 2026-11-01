@@ -36,6 +36,8 @@ public class KoboldCraftItemGoal extends Goal {
     private @Nullable BlockPos targetChestPos = null;
     private int searchCooldown = 0;
     private int craftTicks = 0;
+    private int stuckTicks = 0;
+    private int failedCraftCooldown = 0;
 
     public KoboldCraftItemGoal(KoboldGirlEntity kobold, double speedModifier) {
         this.kobold = kobold;
@@ -51,11 +53,34 @@ public class KoboldCraftItemGoal extends Goal {
     public boolean canUse() {
         if (this.kobold.isSleeping() || this.kobold.isInPowerStruggle() || !this.kobold.isAlive()) return false;
         if (!this.kobold.isWorkStance()) return false;
-        return this.needsTool();
+        if (this.failedCraftCooldown > 0) {
+            this.failedCraftCooldown--;
+            return false;
+        }
+
+        Item neededTool = this.getNeededTool();
+        if (neededTool == Items.AIR) return false;
+
+        int reqCobble = this.getRequiredCobblestone(neededTool);
+        int reqSticks = this.getRequiredSticks(neededTool);
+
+        boolean hasCobble = this.countCobblestoneInInventory() >= reqCobble;
+        int woodPower = this.kobold.countItemInInventory(Items.STICK)
+                + this.kobold.countItemInInventory(Items.OAK_PLANKS) * 2
+                + this.kobold.countItemInInventory(Items.OAK_LOG) * 8;
+        boolean hasSticks = woodPower >= reqSticks;
+
+        if (hasCobble && hasSticks) {
+            return true;
+        }
+
+        // Si no los tiene consigo, solo activar si existe un cofre accesible con los materiales
+        return this.findNearbyChestWithMaterials(this.kobold.level(), !hasCobble, !hasSticks) != null;
     }
 
     @Override
     public boolean canContinueToUse() {
+        if (this.failedCraftCooldown > 0) return false;
         return this.canUse();
     }
 
@@ -65,12 +90,14 @@ public class KoboldCraftItemGoal extends Goal {
         this.targetChestPos = null;
         this.searchCooldown = 0;
         this.craftTicks = 0;
+        this.stuckTicks = 0;
     }
 
     @Override
     public void stop() {
         this.craftingTablePos = null;
         this.targetChestPos = null;
+        this.stuckTicks = 0;
         this.kobold.getNavigation().stop();
     }
 
@@ -78,6 +105,14 @@ public class KoboldCraftItemGoal extends Goal {
     public void tick() {
         Item neededTool = this.getNeededTool();
         if (neededTool == Items.AIR) {
+            this.stop();
+            return;
+        }
+
+        this.stuckTicks++;
+        if (this.stuckTicks > 160) {
+            // Tiempo límite agotado sin poder fabricar: enfriamiento para permitir otras metas y no paralizarse
+            this.failedCraftCooldown = 100;
             this.stop();
             return;
         }
@@ -148,17 +183,18 @@ public class KoboldCraftItemGoal extends Goal {
         KoboldProfession prof = this.kobold.getProfession();
         if (prof == KoboldProfession.MINER) {
             if (!this.kobold.hasPickaxe()) return Items.STONE_PICKAXE;
+            if (!this.kobold.hasShovel()) return Items.STONE_SHOVEL;
+        } else if (prof == KoboldProfession.CARPENTER) {
+            if (!this.kobold.hasAxe()) return Items.STONE_AXE;
         } else if (prof == KoboldProfession.FARMER) {
             if (!this.kobold.hasHoe()) return Items.STONE_HOE;
-        } else if (prof == KoboldProfession.BUILDER || this.kobold.isLogger()) {
-            if (!this.kobold.hasAxe()) return Items.STONE_AXE;
-            if (!this.kobold.hasShovel()) return Items.STONE_SHOVEL;
+        } else if (prof == KoboldProfession.BUILDER) {
             if (!this.kobold.hasPickaxe()) return Items.STONE_PICKAXE;
+            if (!this.kobold.hasAxe()) return Items.STONE_AXE;
         } else if (prof == KoboldProfession.HUNTER) {
             if (!this.kobold.hasAxe() && !this.kobold.hasWeaponInInventory()) return Items.STONE_AXE;
         } else if (prof == KoboldProfession.NONE) {
-            if (!this.kobold.hasAxe()) return Items.STONE_AXE;
-            if (!this.kobold.hasPickaxe()) return Items.STONE_PICKAXE;
+            if (!this.kobold.hasAxe() && !this.kobold.hasPickaxe()) return Items.STONE_PICKAXE;
         }
         return Items.AIR;
     }

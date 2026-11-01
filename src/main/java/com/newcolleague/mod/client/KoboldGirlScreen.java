@@ -175,6 +175,10 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
                         case VIGILANT -> ChatFormatting.AQUA;
                         case HUNTER -> ChatFormatting.GOLD;
                         case BUILDER -> ChatFormatting.YELLOW;
+                        case CARPENTER -> ChatFormatting.DARK_GREEN;
+                        case MINER -> ChatFormatting.DARK_GRAY;
+                        case SCOUT -> ChatFormatting.DARK_AQUA;
+                        case ALCHEMIST -> ChatFormatting.DARK_PURPLE;
                         case SORCERESS -> ChatFormatting.LIGHT_PURPLE;
                         default -> ChatFormatting.GRAY;
                     };
@@ -192,7 +196,11 @@ public class KoboldGirlScreen extends AbstractContainerScreen<KoboldGirlMenu> {
                         case GUARD -> "• Espadas/mazos y escudos\n• +5% Daño Cuerpo a Cuerpo\n• Defiende a la tribu";
                         case VIGILANT -> "• Arcos y ballestas con munición\n• +5% Daño a Distancia\n• Defiende a la tribu";
                         case HUNTER -> "• Caza animales con hachas/arcos\n• Cocina carne en fogatas\n• Pacífica (autodefensa)";
-                        case BUILDER -> "• Acondiciona el terreno de aldea\n• Construye proyectos y edificios\n• Pacífica (autodefensa)";
+                        case BUILDER -> "• Acondiciona el terreno de aldea\n• Construye proyectos con recursos comunales\n• Pacífica (autodefensa)";
+                        case CARPENTER -> "• Tala árboles y recolecta madera\n• Reforesta plantando retoños\n• Deposita en cofres de aldea";
+                        case MINER -> "• Cantera escalonada de superficie a roca\n• Extrae tierra, arena y minerales\n• Deposita en cofres de aldea";
+                        case SCOUT -> "• Explora el perímetro salvaje\n• Rastrea amenazas y recursos\n• Gran velocidad de movimiento";
+                        case ALCHEMIST -> "• Recolecta flores e ingredientes\n• Elabora pociones y brebajes\n• Asistencia para la tribu";
                         case SORCERESS -> "• Canaliza magia arcana ancestral\n• Rayos, Colmillos y Fuego\n• Defiende a la tribu";
                         default -> "";
                     };

@@ -48,7 +48,7 @@ public class HarvestCropGoal extends MoveToBlockGoal {
         if (this.kobold.getProfession() != KoboldProfession.FARMER && !this.kobold.isAnyQueen()) {
             return false;
         }
-        if (!this.kobold.isMorningWorkTime()) {
+        if (!this.kobold.isWorkScheduleTime() || this.kobold.isSleepTime()) {
             return false;
         }
         if (!this.kobold.hasFreeInventorySlot()) {
@@ -68,7 +68,7 @@ public class HarvestCropGoal extends MoveToBlockGoal {
         if (this.kobold.getProfession() != KoboldProfession.FARMER && !this.kobold.isAnyQueen()) {
             return false;
         }
-        if (!this.kobold.isMorningWorkTime()) {
+        if (!this.kobold.isWorkScheduleTime() || this.kobold.isSleepTime()) {
             return false;
         }
         if (!this.kobold.hasFreeInventorySlot()) {

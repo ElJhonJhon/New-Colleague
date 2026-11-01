@@ -13,6 +13,7 @@ public class ClientModEvents {
     @SubscribeEvent
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModEntities.KOBOLD_GIRL.get(), KoboldGirlRenderer::new);
+        event.registerEntityRenderer(ModEntities.SPIKE_BEAST.get(), com.newcolleague.mod.client.boss.SpikeBeastRenderer::new);
     }
 
     @SubscribeEvent

@@ -33,5 +33,6 @@ public class NewColleagueMod {
 
     private void registerAttributes(EntityAttributeCreationEvent event) {
         event.put(ModEntities.KOBOLD_GIRL.get(), KoboldGirlEntity.createAttributes().build());
+        event.put(ModEntities.SPIKE_BEAST.get(), com.newcolleague.mod.entity.boss.SpikeBeastEntity.createAttributes().build());
     }
 }

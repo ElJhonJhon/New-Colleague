@@ -2,6 +2,7 @@ package com.newcolleague.mod.entity.ai;
 
 import com.newcolleague.mod.entity.KoboldGirlEntity;
 import com.newcolleague.mod.entity.AbstractTribalEntity.CommandStance;
+import com.newcolleague.mod.village.VillageProject;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.WaterAvoidingRandomStrollGoal;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -37,6 +38,9 @@ public class SafeKoboldStrollGoal extends WaterAvoidingRandomStrollGoal {
         KoboldGirlEntity queen = this.kobold.isRebel() ? this.kobold.getTribeQueen() : null;
         Vec3 queenPos = (queen != null && queen.isAlive()) ? queen.position() : null;
 
+        KoboldGirlEntity projectQueen = this.kobold.isAnyQueen() ? this.kobold : this.kobold.getTribeQueen();
+        VillageProject activeProject = projectQueen != null ? projectQueen.getActiveVillageProject() : null;
+
         // Intentar hasta 8 veces encontrar una posición de deambulación segura, priorizando Dirt Path
         for (int attempt = 0; attempt < 8; attempt++) {
             Vec3 candidate = super.getPosition();
@@ -46,6 +50,12 @@ public class SafeKoboldStrollGoal extends WaterAvoidingRandomStrollGoal {
                     continue;
                 }
                 BlockPos targetPos = BlockPos.containing(candidate);
+
+                // Evitar deambular dentro del área de una obra activa para no aglomerarse ni asfixiarse
+                if (activeProject != null && !activeProject.isCompleted() && activeProject.isInsideOrNear(targetPos, 2)) {
+                    continue;
+                }
+
                 // Evitar elegir posiciones cercanas a precipicios (>2 bloques) o peligros
                 if (!KoboldGirlEntity.isNearDangerousDrop(this.kobold.level(), targetPos, 2)
                         && !KoboldGirlEntity.isNearHazard(this.kobold.level(), targetPos, 2)) {
@@ -67,7 +77,9 @@ public class SafeKoboldStrollGoal extends WaterAvoidingRandomStrollGoal {
                     Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     BlockPos.containing(this.kobold.position().add(dir))
             );
-            if (!KoboldGirlEntity.isNearDangerousDrop(this.kobold.level(), ground, 2) && !KoboldGirlEntity.isNearHazard(this.kobold.level(), ground, 2)) {
+            if (!KoboldGirlEntity.isNearDangerousDrop(this.kobold.level(), ground, 2)
+                    && !KoboldGirlEntity.isNearHazard(this.kobold.level(), ground, 2)
+                    && (activeProject == null || activeProject.isCompleted() || !activeProject.isInsideOrNear(ground, 2))) {
                 return Vec3.atBottomCenterOf(ground);
             }
         }

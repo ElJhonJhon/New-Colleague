@@ -11,6 +11,7 @@ public enum KoboldRole {
     VIGILANT,
     HUNTER,
     BUILDER,
+    CARPENTER,
     ALCHEMIST,
     SCOUT,
     MINER,

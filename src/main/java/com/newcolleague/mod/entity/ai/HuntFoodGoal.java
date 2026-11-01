@@ -18,18 +18,21 @@ public class HuntFoodGoal extends NearestAttackableTargetGoal<Animal> {
     public HuntFoodGoal(KoboldGirlEntity mob) {
         super(mob, Animal.class, 0, false, false, (target, level) -> {
             if (!(target instanceof Animal animal)) return false;
+            // Proteger crías siempre
             if (animal.isBaby()) return false;
             if (mob.distanceToSqr(target) > 256.0D) return false;
             if (!mob.hasLineOfSight(target)) return false;
 
-            // Regla DO_NOT_KILL: proteger si quedan <= 2 ejemplares de la especie en el perímetro
-            List<? extends Animal> localSpecies = level.getEntitiesOfClass(
-                    animal.getClass(),
-                    animal.getBoundingBox().inflate(16.0D),
-                    a -> a.isAlive() && !a.isBaby()
-            );
-            if (localSpecies.size() <= 2) {
-                return false;
+            // Proteger el último ejemplar adulto solitario salvo si la cazadora necesita comida con urgencia
+            if (!mob.needsFood() && mob.countRawMeatInInventory() >= 4) {
+                List<? extends Animal> localSpecies = level.getEntitiesOfClass(
+                        animal.getClass(),
+                        animal.getBoundingBox().inflate(16.0D),
+                        a -> a.isAlive() && !a.isBaby()
+                );
+                if (localSpecies.size() <= 1) {
+                    return false;
+                }
             }
 
             return KoboldGirlEntity.isFoodAnimal(target);
@@ -48,8 +51,8 @@ public class HuntFoodGoal extends NearestAttackableTargetGoal<Animal> {
         if (this.kobold.getProfession() != KoboldProfession.HUNTER && !this.kobold.isAnyQueen()) {
             return false;
         }
-        // Solo cazar en la jornada de trabajo matutina (7:00 AM a 1:00 PM: ticks 1000 a 7000)
-        if (!this.kobold.isMorningWorkTime()) {
+        // Cazar durante la jornada diurna de trabajo mientras no sea hora de dormir
+        if (!this.kobold.isWorkScheduleTime() || this.kobold.isSleepTime()) {
             return false;
         }
         if (this.kobold.isInventoryFullOfMeat()) {
@@ -73,7 +76,7 @@ public class HuntFoodGoal extends NearestAttackableTargetGoal<Animal> {
         if (this.kobold.getProfession() != KoboldProfession.HUNTER && !this.kobold.isAnyQueen()) {
             return false;
         }
-        if (!this.kobold.isMorningWorkTime()) {
+        if (!this.kobold.isWorkScheduleTime() || this.kobold.isSleepTime()) {
             return false;
         }
         if (this.kobold.isInventoryFullOfMeat()) {

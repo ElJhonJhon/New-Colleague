@@ -17,6 +17,7 @@ public class ModCreativeTabs {
                     .icon(() -> ModItems.KOBOLD_GIRL_SPAWN_EGG.get().getDefaultInstance())
                     .displayItems((parameters, output) -> {
                         output.accept(ModItems.KOBOLD_GIRL_SPAWN_EGG.get());
+                        output.accept(ModItems.SPIKE_BEAST_SPAWN_EGG.get());
                         output.accept(ModItems.BACULO.get());
                     })
                     .build());

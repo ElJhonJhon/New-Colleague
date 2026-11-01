@@ -3,9 +3,11 @@ package com.newcolleague.mod.entity.ai;
 import com.newcolleague.mod.entity.KoboldGirlEntity;
 import com.newcolleague.mod.entity.AbstractTribalEntity.KoboldProfession;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 import java.util.EnumSet;
 import java.util.List;
@@ -63,6 +65,12 @@ public class PickupGroundItemGoal extends Goal {
             } else if (this.mob.getProfession() == KoboldProfession.VIGILANT && KoboldGirlEntity.isArrowItem(stack)) {
                 priority = 80.0D;
             } else if (this.mob.getProfession() == KoboldProfession.GUARD && (KoboldGirlEntity.isShield(stack) || KoboldGirlEntity.isWeapon(stack))) {
+                priority = 80.0D;
+            } else if (this.mob.getProfession() == KoboldProfession.CARPENTER && (stack.is(ItemTags.LOGS) || stack.is(ItemTags.PLANKS) || stack.is(ItemTags.SAPLINGS) || stack.is(Items.STICK))) {
+                priority = 80.0D;
+            } else if (this.mob.getProfession() == KoboldProfession.MINER && (KoboldGirlEntity.isMineralOrResource(stack) || stack.is(ItemTags.STONE_CRAFTING_MATERIALS) || stack.is(ItemTags.DIRT) || stack.is(Items.COBBLESTONE) || stack.is(Items.DIRT))) {
+                priority = 80.0D;
+            } else if (this.mob.getProfession() == KoboldProfession.BUILDER && (stack.is(ItemTags.PLANKS) || stack.is(ItemTags.LOGS) || stack.is(Items.COBBLESTONE) || stack.is(ItemTags.DIRT) || stack.is(Items.DIRT))) {
                 priority = 80.0D;
             }
 

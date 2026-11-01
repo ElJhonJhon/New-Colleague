@@ -1,0 +1,48 @@
+================================================================================
+GUÍA DE ESTRUCTURAS NBT PARA EL MOD NEW COLLEAGUE
+================================================================================
+
+Este directorio está configurado para recibir los archivos .nbt exportados con el
+Bloque de Estructuras (Structure Block) de Minecraft.
+
+--------------------------------------------------------------------------------
+1. ESTRUCTURAS DE PROGRESIÓN DE LA ALDEA (Reemplazo automático de código)
+--------------------------------------------------------------------------------
+Si colocas un archivo .nbt con cualquiera de los siguientes nombres en esta carpeta,
+la tribu dejará de usar el plano en código Java y construirá exactamente tu estructura NBT:
+
+- campfire_base.nbt -> Campamento Central (Fogata comunal de fundación)
+- tent.nbt          -> Tienda de Descanso (Habitación para súbditas y camas)
+- farm.nbt          -> Granja Comunal (Huerto de cultivos)
+- storehouse.nbt    -> Depósito de Suministros (Almacén de cofres y barriles)
+- watchtower.nbt    -> Torre de Guardia (Puesto de vigía y defensa)
+
+--------------------------------------------------------------------------------
+2. ESTRUCTURAS PERSONALIZADAS ADICIONALES
+--------------------------------------------------------------------------------
+También puedes guardar cualquier otra estructura con el nombre que desees:
+- casa_aldeano.nbt
+- herreria_tribal.nbt
+- pozo_comunal.nbt
+
+El cargador NbtStructureLoader las detectará en el juego con el ID:
+"newcolleaguemod:<nombre_sin_extension>"
+
+--------------------------------------------------------------------------------
+3. PASO A PASO PARA CREAR Y EXPORTAR EN EL JUEGO:
+--------------------------------------------------------------------------------
+1. Entra a un mundo de pruebas en Modo Creativo.
+2. Construye tu estructura usando bloques normales de Minecraft.
+3. Consigue un Structure Block con: /give @p structure_block
+4. Coloca el bloque en una esquina y cámbialo a modo [SAVE] (Guardar).
+5. Escribe en el nombre de la estructura:
+   newcolleaguemod:tent   (o el nombre que vayas a usar)
+6. Ajusta los tamaños X, Y, Z y la posición para que cubra toda tu construcción.
+7. Haz clic en "GUARDAR".
+8. Abre la carpeta de tu mundo:
+   .minecraft/saves/<NombreDelMundo>/generated/newcolleaguemod/structures/
+9. Copia el archivo .nbt generado y pégalo aquí en:
+   src/main/resources/data/newcolleaguemod/structure/
+10. ¡Listo! Al compilar o jugar, tus súbditas constructoras talarán los árboles,
+    aplanarán el terreno y edificarán tu estructura NBT bloque a bloque.
+================================================================================

@@ -1,5 +1,4 @@
 package com.newcolleague.mod.entity;
-//todo esto da pase a trabajar mejor con futuras especies y no buscar a lo loco acciones en un solo documento
 import com.geckolib.animatable.GeoEntity;
 import com.geckolib.animatable.instance.AnimatableInstanceCache;
 import com.geckolib.animatable.manager.AnimatableManager;
@@ -349,6 +348,9 @@ public class KoboldGirlEntity extends AbstractTribalEntity implements GeoEntity 
         // 10. Aplanar terreno, nivelar y construir estructuras tribales (Constructoras y súbditas en trabajo)
         this.goalSelector.addGoal(10, new KoboldVillageBuildGoal(this, 1.15D));
 
+        // 10. Silvicultura, tala sostenible, recolección y plantación de árboles (Exclusivo Carpinteras)
+        this.goalSelector.addGoal(10, new KoboldForestryGoal(this, 1.15D));
+
         // 10. Cocinar carne cruda en fogatas (Exclusivo Cazadoras)
         this.goalSelector.addGoal(10, new KoboldCookMeatAtCampfireGoal(this, 1.15D));
 
@@ -357,6 +359,9 @@ public class KoboldGirlEntity extends AbstractTribalEntity implements GeoEntity 
 
         // 10. Minería subterránea en escuadrón e iluminación (Exclusivo Mineras)
         this.goalSelector.addGoal(10, new KoboldMiningSquadGoal(this, 1.15D));
+
+        // 10. Alquimia, botanica y auxilio curativo (Exclusivo Alquimistas)
+        this.goalSelector.addGoal(10, new KoboldAlchemistGoal(this, 1.15D));
 
         // 11. Usar cofres para almacenar excedentes (bloques, semillas, comida) y reabastecerse de comida
         this.goalSelector.addGoal(11, new KoboldChestGoal(this));

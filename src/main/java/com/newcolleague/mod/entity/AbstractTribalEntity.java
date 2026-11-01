@@ -19,7 +19,8 @@ import com.newcolleague.mod.network.QueenDialogueActionPayload;
 import com.newcolleague.mod.network.OpenQueenDialoguePayload;
 import com.newcolleague.mod.village.VillageTier;
 import com.newcolleague.mod.village.VillageProject;
-import com.newcolleague.mod.village.StructureBlueprint;
+import com.newcolleague.mod.village.NbtStructureLoader;
+import com.newcolleague.mod.village.NbtStructureLoader.StructureType;
 import com.newcolleague.mod.village.QueenRoleManager;
 import com.newcolleague.mod.village.VillageStorage;
 import com.newcolleague.mod.entity.ai.KoboldCraftItemGoal;
@@ -281,18 +282,61 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
     private static final EntityDataAccessor<Boolean> DATA_IS_MARKED_FOR_EXECUTION =
             SynchedEntityData.defineId(AbstractTribalEntity.class, EntityDataSerializers.BOOLEAN);
 
-    // Sistema de Aldea, Expansión, Nivelación de Terreno y Construcción
+    // Variante de textura de la tribu (0 = original/default, 1 = roja, 2 = azul, etc.)
+    private static final EntityDataAccessor<Integer> DATA_TRIBE_VARIANT =
+            SynchedEntityData.defineId(AbstractTribalEntity.class, EntityDataSerializers.INT);
+
+    // Sistema de Aldea, Expansión, Nivelación de Terreno y Construcción Organizada
     private @Nullable VillageProject activeVillageProject = null;
     private int builtStructuresCount = 0;
+    private int builtTentsCount = 0;
+    private int builtFarmsCount = 0;
+    private int builtStorehousesCount = 0;
+    private int builtWatchtowersCount = 0;
+    private @Nullable Integer villageOrientationAngle = null;
     private @Nullable BlockPos campCenterPos = null;
-    private final List<StructureBlueprint.VillagePlot> occupiedVillagePlots = new ArrayList<>();
+    private final List<NbtStructureLoader.VillagePlot> occupiedVillagePlots = new ArrayList<>();
     private @Nullable Item villageProjectMissingItem = null;
 
-    public List<StructureBlueprint.VillagePlot> getOccupiedVillagePlots() {
+    public int getVillageOrientationAngle() {
+        if (this.villageOrientationAngle == null) {
+            int hash = this.hasTribe() ? this.getTribeName().hashCode() : this.getUUID().hashCode();
+            int step = Math.floorMod(hash, 4);
+            this.villageOrientationAngle = step * 90;
+        }
+        return this.villageOrientationAngle;
+    }
+
+    public void setVillageOrientationAngle(int angle) {
+        this.villageOrientationAngle = Math.floorMod(angle, 360);
+    }
+
+    public int getBuiltStructuresCount(NbtStructureLoader.StructureType type) {
+        int plotCount = 0;
+        for (NbtStructureLoader.VillagePlot plot : this.occupiedVillagePlots) {
+            if (plot.structureType() == type) {
+                plotCount++;
+            }
+        }
+        if (plotCount > 0) return plotCount;
+        return switch (type) {
+            case CAMPFIRE_BASE -> (this.builtStructuresCount > 0) ? 1 : 0;
+            case TENT -> this.builtTentsCount;
+            case FARM -> this.builtFarmsCount;
+            case STOREHOUSE -> this.builtStorehousesCount;
+            case WATCHTOWER -> this.builtWatchtowersCount;
+        };
+    }
+
+    public boolean hasBuiltStructure(NbtStructureLoader.StructureType type) {
+        return this.getBuiltStructuresCount(type) > 0;
+    }
+
+    public List<NbtStructureLoader.VillagePlot> getOccupiedVillagePlots() {
         return this.occupiedVillagePlots;
     }
 
-    public void addOccupiedVillagePlot(StructureBlueprint.VillagePlot plot) {
+    public void addOccupiedVillagePlot(NbtStructureLoader.VillagePlot plot) {
         this.occupiedVillagePlots.add(plot);
     }
 
@@ -351,6 +395,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         VIGILANT("Vigilante"),
         HUNTER("Cazadora"),
         BUILDER("Constructora"),
+        CARPENTER("Carpintera"),
         ALCHEMIST("Alquimista"),
         SCOUT("Exploradora"),
         MINER("Minera"),
@@ -377,7 +422,9 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         }
 
         public static KoboldProfession getRandomProfession(RandomSource random) {
-            KoboldProfession[] professions = new KoboldProfession[]{FARMER, GUARD, VIGILANT, HUNTER};
+            KoboldProfession[] professions = new KoboldProfession[]{
+                    FARMER, GUARD, VIGILANT, HUNTER, BUILDER, CARPENTER, MINER, SCOUT, ALCHEMIST
+            };
             return professions[random.nextInt(professions.length)];
         }
     }
@@ -681,8 +728,31 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             this.setYHeadRot(this.getYHeadRot() + (this.random.nextFloat() - 0.5F) * 15.0F);
             this.setYBodyRot(this.yBodyRot + (this.random.nextFloat() - 0.5F) * 12.0F);
         }
+        if (!this.level().isClientSide() && this.isAlive() && this.isInWall()) {
+            this.pushOutOfSuffocatingBlock();
+        }
         if (!this.level().isClientSide() && this.isAnyQueen() && this.tickCount % 20 == 0) {
             this.serverVillageTick();
+        }
+    }
+
+    protected void pushOutOfSuffocatingBlock() {
+        BlockPos currentPos = this.blockPosition();
+        for (Direction dir : Direction.values()) {
+            if (dir.getAxis().isHorizontal()) {
+                BlockPos neighbor = currentPos.relative(dir);
+                if (!this.level().getBlockState(neighbor).isSuffocating(this.level(), neighbor)
+                        && !this.level().getBlockState(neighbor.above()).isSuffocating(this.level(), neighbor.above())) {
+                    this.teleportTo(neighbor.getX() + 0.5D, this.getY(), neighbor.getZ() + 0.5D);
+                    this.setDeltaMovement(this.getDeltaMovement().add(dir.getStepX() * 0.2D, 0.1D, dir.getStepZ() * 0.2D));
+                    return;
+                }
+            }
+        }
+        BlockPos above = currentPos.above();
+        if (!this.level().getBlockState(above).isSuffocating(this.level(), above)) {
+            this.teleportTo(this.getX(), above.getY(), this.getZ());
+            this.setDeltaMovement(this.getDeltaMovement().add(0.0D, 0.2D, 0.0D));
         }
     }
 
@@ -705,6 +775,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         builder.define(DATA_IS_REINCARNATING, false);
         builder.define(DATA_IS_DOWNED_QUEEN, false);
         builder.define(DATA_IS_MARKED_FOR_EXECUTION, false);
+        builder.define(DATA_TRIBE_VARIANT, 0);
     }
 
     // Toda esta parte es para la generación de la tribu y su nombre
@@ -761,10 +832,16 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
     public static class KoboldGroupData implements SpawnGroupData {
         public final boolean isQueenAssigned;
         public final String tribeName;
+        public final int tribeVariant;
 
-        public KoboldGroupData(boolean isQueenAssigned, String tribeName) {
+        public KoboldGroupData(boolean isQueenAssigned, String tribeName, int tribeVariant) {
             this.isQueenAssigned = isQueenAssigned;
             this.tribeName = tribeName;
+            this.tribeVariant = tribeVariant;
+        }
+
+        public KoboldGroupData(boolean isQueenAssigned, String tribeName) {
+            this(isQueenAssigned, tribeName, 0);
         }
     }
 
@@ -777,21 +854,29 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
                 this.setProfession(KoboldProfession.NONE);
                 String tribe = generateRandomTribeName(level.getRandom());
                 this.setTribeName(tribe);
-                KoboldGroupData groupData = new KoboldGroupData(true, tribe);
+                int variant = KoboldTribeVariant.getRandom(level.getRandom()).getId();
+                this.setTribeVariant(variant);
+                KoboldGroupData groupData = new KoboldGroupData(true, tribe, variant);
 
-                // Tamaño de grupo aleatorio: mínimo 5 y máximo 10 Kobold Girls
-                int groupSize = 5 + level.getRandom().nextInt(6); // 5 a 10 inclusive
+                // La tribu más pequeña generada tiene como mínimo un miembro de cada profesión (exceptuando hechicera)
                 KoboldProfession[] baseRoles = new KoboldProfession[]{
+                        KoboldProfession.BUILDER,
+                        KoboldProfession.CARPENTER,
+                        KoboldProfession.MINER,
                         KoboldProfession.FARMER,
+                        KoboldProfession.HUNTER,
                         KoboldProfession.GUARD,
                         KoboldProfession.VIGILANT,
-                        KoboldProfession.HUNTER
+                        KoboldProfession.SCOUT,
+                        KoboldProfession.ALCHEMIST
                 };
+                int groupSize = baseRoles.length + 1 + level.getRandom().nextInt(4); // Mínimo 10: 1 Reina + 9 profesiones esenciales
 
                 for (int i = 1; i < groupSize; i++) {
                     AbstractTribalEntity subdita = this.createSubdita(level);
                     subdita.setQueen(false);
                     subdita.setTribeName(tribe);
+                    subdita.setTribeVariant(variant);
                     KoboldProfession prof = (i - 1 < baseRoles.length)
                             ? baseRoles[i - 1]
                             : KoboldProfession.getRandomProfession(level.getRandom());
@@ -851,6 +936,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
                 if (groupData.tribeName != null && !groupData.tribeName.isEmpty()) {
                     this.setTribeName(groupData.tribeName);
                 }
+                this.setTribeVariant(groupData.tribeVariant);
                 if (this.getProfession() == KoboldProfession.NONE) {
                     this.setProfession(KoboldProfession.getRandomProfession(level.getRandom()));
                     this.initProfessionEquipment();
@@ -861,9 +947,13 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         if (this.isQueen() && this.getTribeName().isEmpty()) {
             this.setTribeName(generateRandomTribeName(level.getRandom()));
             this.setProfession(KoboldProfession.NONE);
+            this.setTribeVariant(KoboldTribeVariant.getRandom(level.getRandom()).getId());
         } else if (!this.isQueen() && this.getProfession() == KoboldProfession.NONE) {
             this.setProfession(KoboldProfession.getRandomProfession(level.getRandom()));
             this.initProfessionEquipment();
+            if (this.getTribeVariant() == 0) {
+                this.setTribeVariant(KoboldTribeVariant.getRandom(level.getRandom()).getId());
+            }
         }
         if (this.isAnyQueen()) {
             this.setProfession(KoboldProfession.NONE);
@@ -896,6 +986,30 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             }
             case HUNTER -> {
                 this.inventory.addItem(new ItemStack(Items.STONE_AXE));
+            }
+            case BUILDER -> {
+                this.inventory.addItem(new ItemStack(Items.STONE_PICKAXE));
+                this.inventory.addItem(new ItemStack(Items.STONE_SHOVEL));
+                this.inventory.addItem(new ItemStack(Items.DIRT, 16));
+            }
+            case CARPENTER -> {
+                this.inventory.addItem(new ItemStack(Items.STONE_AXE));
+                this.inventory.addItem(new ItemStack(Items.OAK_SAPLING, 8));
+            }
+            case MINER -> {
+                this.inventory.addItem(new ItemStack(Items.STONE_PICKAXE));
+                this.inventory.addItem(new ItemStack(Items.STONE_SHOVEL));
+                this.inventory.addItem(new ItemStack(Items.TORCH, 8));
+            }
+            case SCOUT -> {
+                this.inventory.addItem(new ItemStack(Items.LEATHER_BOOTS));
+                this.inventory.addItem(new ItemStack(Items.COMPASS));
+                this.inventory.addItem(new ItemStack(Items.BREAD, 6));
+            }
+            case ALCHEMIST -> {
+                this.inventory.addItem(new ItemStack(Items.GLASS_BOTTLE, 3));
+                this.inventory.addItem(new ItemStack(Items.RED_MUSHROOM, 2));
+                this.inventory.addItem(new ItemStack(Items.BROWN_MUSHROOM, 2));
             }
             default -> {}
         }
@@ -1126,13 +1240,14 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         this.campCenterPos = pos;
     }
 
-    public @Nullable BlockPos findNonOverlappingSite(StructureBlueprint.StructureType type) {
-        BlockPos center = this.getCampCenterPos();
-        int width = type.getWidth();
-        int length = type.getLength();
+    public @Nullable BlockPos findNonOverlappingSite(NbtStructureLoader.StructureType type) {
+        net.minecraft.core.Vec3i dims = NbtStructureLoader.getDimensions(this.level(), type);
+        int width = dims.getX();
+        int length = dims.getZ();
 
-        // 1. Si es el Campamento Central (fogata base), se ubica centrado en la posición de la aldea
-        if (type == StructureBlueprint.StructureType.CAMPFIRE_BASE) {
+        // 1. Campamento Central (fogata base): centrado en la posición de la aldea
+        if (type == NbtStructureLoader.StructureType.CAMPFIRE_BASE) {
+            BlockPos center = this.getCampCenterPos();
             int ox = -width / 2;
             int oz = -length / 2;
             int candMinX = center.getX() + ox;
@@ -1145,96 +1260,307 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
                 surfacePos = surfacePos.below();
             }
             int targetY = Math.max(this.level().getMinY() + 1, surfacePos.getY());
-            StructureBlueprint.VillagePlot plot = new StructureBlueprint.VillagePlot(candMinX, candMinZ, candMaxX, candMaxZ);
+            this.setCampCenterPos(new BlockPos(center.getX(), targetY, center.getZ()));
+            NbtStructureLoader.VillagePlot plot = new NbtStructureLoader.VillagePlot(candMinX, candMinZ, candMaxX, candMaxZ, type);
             this.occupiedVillagePlots.add(plot);
             return new BlockPos(candMinX, targetY, candMinZ);
         }
 
-        // Si la lista de parcelas está vacía pero ya existe el campamento base, registrar el área central
-        if (this.occupiedVillagePlots.isEmpty()) {
-            this.occupiedVillagePlots.add(new StructureBlueprint.VillagePlot(center.getX() - 3, center.getZ() - 3, center.getX() + 3, center.getZ() + 3));
+        // 2. Búsqueda con Patrón Urbano Organizado y Zonificación por Sectores
+        BlockPos site = this.findZonedSiteForStructure(type, width, length);
+        if (site != null) {
+            return site;
         }
 
-        // 2. Búsqueda en anillos concéntricos alrededor del centro comunal (distancias de 8 a 42 bloques)
-        for (int dist = 8; dist <= 42; dist += 3) {
-            for (int angleDeg = 0; angleDeg < 360; angleDeg += 30) {
+        // 3. Fallback General: Si el terreno en el sector específico está bloqueado (ej: lago o barranco)
+        return this.findNonOverlappingSiteGeneral(width, length, type);
+    }
+
+    private @Nullable BlockPos findZonedSiteForStructure(NbtStructureLoader.StructureType type, int width, int length) {
+        BlockPos center = this.getCampCenterPos();
+        int baseAngle = this.getVillageOrientationAngle();
+
+        switch (type) {
+            case WATCHTOWER -> {
+                // Las torres de guardia se sitúan en las esquinas del perímetro exterior (~30 a 34 bloques del centro)
+                // Esquinas diagonales relativas a la orientación: +45° (NE), +225° (SO), +315° (NO), +135° (SE)
+                int perimeterDist = 32;
+                int[] cornerOffsets = new int[] { 45, 225, 315, 135 };
+
+                // Buscar la primera esquina no fortificada
+                for (int cornerDeg : cornerOffsets) {
+                    int cornerAngle = (baseAngle + cornerDeg) % 360;
+                    double rad = Math.toRadians(cornerAngle);
+                    int targetCenterX = center.getX() + (int) Math.round(perimeterDist * Math.sin(rad));
+                    int targetCenterZ = center.getZ() - (int) Math.round(perimeterDist * Math.cos(rad));
+
+                    boolean alreadyFortified = false;
+                    for (NbtStructureLoader.VillagePlot plot : this.occupiedVillagePlots) {
+                        if (plot.structureType() == NbtStructureLoader.StructureType.WATCHTOWER && plot.centerDistanceSqr(targetCenterX, targetCenterZ) <= 196.0D) {
+                            alreadyFortified = true;
+                            break;
+                        }
+                    }
+                    if (alreadyFortified) continue;
+
+                    // Probar sitio alrededor de esta esquina
+                    for (int dr = 0; dr <= 4; dr += 2) {
+                        for (int da = -16; da <= 16; da += 8) {
+                            double candRad = Math.toRadians((cornerAngle + da + 360) % 360);
+                            int r = perimeterDist + dr;
+                            int cx = center.getX() + (int) Math.round(r * Math.sin(candRad));
+                            int cz = center.getZ() - (int) Math.round(r * Math.cos(candRad));
+                            BlockPos res = this.testAndSelectCandidatePlot(cx - width / 2, cz - length / 2, width, length, type);
+                            if (res != null) return res;
+                        }
+                    }
+                }
+
+                // Si las 4 esquinas ya tienen torres, colocar en los accesos cardinales del perímetro
+                int[] gateOffsets = new int[] { 0, 90, 180, 270 };
+                for (int gateDeg : gateOffsets) {
+                    int gateAngle = (baseAngle + gateDeg) % 360;
+                    double rad = Math.toRadians(gateAngle);
+                    int cx = center.getX() + (int) Math.round(perimeterDist * Math.sin(rad));
+                    int cz = center.getZ() - (int) Math.round(perimeterDist * Math.cos(rad));
+                    BlockPos res = this.testAndSelectCandidatePlot(cx - width / 2, cz - length / 2, width, length, type);
+                    if (res != null) return res;
+                }
+            }
+
+            case TENT -> {
+                // Sector Residencial: Avenida ordenada en dirección al frente (+v)
+                // Filas a ambos lados de la calle (izq: u = -6, der: u = +6; expansión: u = -12, u = 12)
+                int[] vRows = new int[] { 11, 18, 25, 32 };
+                int[] uSides = new int[] { -6, 6, -12, 12 };
+
+                for (int v : vRows) {
+                    for (int u : uSides) {
+                        for (int du = 0; du <= 2; du += 2) {
+                            for (int dv = 0; dv <= 2; dv += 2) {
+                                BlockPos worldPos = this.localToWorld(center, baseAngle, u + du, v + dv);
+                                BlockPos res = this.testAndSelectCandidatePlot(worldPos.getX() - width / 2, worldPos.getZ() - length / 2, width, length, type);
+                                if (res != null) return res;
+                            }
+                        }
+                    }
+                }
+
+                // Cono ampliado del sector residencial (±40°)
+                for (int dist = 10; dist <= 34; dist += 3) {
+                    for (int da = -40; da <= 40; da += 10) {
+                        double rad = Math.toRadians((baseAngle + da + 360) % 360);
+                        int cx = center.getX() + (int) Math.round(dist * Math.sin(rad));
+                        int cz = center.getZ() - (int) Math.round(dist * Math.cos(rad));
+                        BlockPos res = this.testAndSelectCandidatePlot(cx - width / 2, cz - length / 2, width, length, type);
+                        if (res != null) return res;
+                    }
+                }
+            }
+
+            case FARM -> {
+                // Sector Agrícola: Campos en dirección opuesta (-v)
+                int[] vBands = new int[] { -13, -20, -27, -34 };
+                int[] uPlots = new int[] { 0, -7, 7, -14, 14 };
+
+                for (int v : vBands) {
+                    for (int u : uPlots) {
+                        for (int du = 0; du <= 2; du += 2) {
+                            for (int dv = 0; dv <= 2; dv += 2) {
+                                BlockPos worldPos = this.localToWorld(center, baseAngle, u + du, v + dv);
+                                BlockPos res = this.testAndSelectCandidatePlot(worldPos.getX() - width / 2, worldPos.getZ() - length / 2, width, length, type);
+                                if (res != null) return res;
+                            }
+                        }
+                    }
+                }
+
+                // Cono ampliado del sector agrícola (180° ± 40°)
+                for (int dist = 12; dist <= 36; dist += 3) {
+                    for (int da = -40; da <= 40; da += 10) {
+                        double rad = Math.toRadians((baseAngle + 180 + da + 360) % 360);
+                        int cx = center.getX() + (int) Math.round(dist * Math.sin(rad));
+                        int cz = center.getZ() - (int) Math.round(dist * Math.cos(rad));
+                        BlockPos res = this.testAndSelectCandidatePlot(cx - width / 2, cz - length / 2, width, length, type);
+                        if (res != null) return res;
+                    }
+                }
+            }
+
+            case STOREHOUSE -> {
+                // Sector Logístico: En el flanco lateral junto a la plaza comunal (+u = +90° o -90°)
+                int[] uFlanks = new int[] { 11, -11, 17, -17 };
+                int[] vOffsets = new int[] { 0, 5, -5, 10, -10 };
+
+                for (int u : uFlanks) {
+                    for (int v : vOffsets) {
+                        for (int du = 0; du <= 2; du += 2) {
+                            for (int dv = 0; dv <= 2; dv += 2) {
+                                BlockPos worldPos = this.localToWorld(center, baseAngle, u + du, v + dv);
+                                BlockPos res = this.testAndSelectCandidatePlot(worldPos.getX() - width / 2, worldPos.getZ() - length / 2, width, length, type);
+                                if (res != null) return res;
+                            }
+                        }
+                    }
+                }
+
+                // Cono ampliado del sector logístico
+                for (int dist = 9; dist <= 24; dist += 3) {
+                    for (int side : new int[] { 90, 270 }) {
+                        for (int da = -30; da <= 30; da += 10) {
+                            double rad = Math.toRadians((baseAngle + side + da + 360) % 360);
+                            int cx = center.getX() + (int) Math.round(dist * Math.sin(rad));
+                            int cz = center.getZ() - (int) Math.round(dist * Math.cos(rad));
+                            BlockPos res = this.testAndSelectCandidatePlot(cx - width / 2, cz - length / 2, width, length, type);
+                            if (res != null) return res;
+                        }
+                    }
+                }
+            }
+
+            default -> {}
+        }
+
+        return null;
+    }
+
+    private BlockPos localToWorld(BlockPos center, int baseAngle, int u, int v) {
+        double beta = Math.toRadians(baseAngle);
+        int dx = (int) Math.round(u * Math.cos(beta) + v * Math.sin(beta));
+        int dz = (int) Math.round(u * Math.sin(beta) - v * Math.cos(beta));
+        return new BlockPos(center.getX() + dx, center.getY(), center.getZ() + dz);
+    }
+
+    private @Nullable BlockPos testAndSelectCandidatePlot(int candMinX, int candMinZ, int width, int length, @Nullable StructureType type) {
+        BlockPos center = this.getCampCenterPos();
+        int candMaxX = candMinX + width - 1;
+        int candMaxZ = candMinZ + length - 1;
+
+        // Verificación A: No colisionar con ninguna parcela ya construida o reservada (con margen de 2 bloques)
+        for (NbtStructureLoader.VillagePlot plot : this.occupiedVillagePlots) {
+            if (plot.intersects(candMinX, candMinZ, candMaxX, candMaxZ, 2)) {
+                return null;
+            }
+        }
+
+        // Verificación B: No superponerse con el campamento central
+        if (Math.abs((candMinX + width / 2) - center.getX()) <= 4 && Math.abs((candMinZ + length / 2) - center.getZ()) <= 4) {
+            return null;
+        }
+
+        // Verificación C: Inspección en el mundo del terreno y estructuras existentes del jugador
+        int minY = Integer.MAX_VALUE;
+        int maxY = Integer.MIN_VALUE;
+
+        for (int x = candMinX; x <= candMaxX; x++) {
+            for (int z = candMinZ; z <= candMaxZ; z++) {
+                int surfaceY = this.level().getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
+                BlockPos testPos = new BlockPos(x, surfaceY, z);
+                while (testPos.getY() > this.level().getMinY() && (this.level().getBlockState(testPos).isAir() || this.level().getBlockState(testPos).is(BlockTags.LEAVES))) {
+                    testPos = testPos.below();
+                }
+                int y = testPos.getY();
+                BlockState stateAt = this.level().getBlockState(testPos);
+                BlockState stateAbove = this.level().getBlockState(testPos.above());
+
+                // No construir en agua o lava
+                if (stateAt.getFluidState().is(FluidTags.WATER) || stateAt.getFluidState().is(FluidTags.LAVA)
+                        || stateAbove.getFluidState().is(FluidTags.WATER) || stateAbove.getFluidState().is(FluidTags.LAVA)) {
+                    return null;
+                }
+
+                // Proteger estructuras y pertenencias de jugadores (cofres, camas, hornos, entidades con bloque)
+                if (stateAt.hasBlockEntity() || stateAbove.hasBlockEntity()
+                        || stateAt.is(Blocks.CHEST) || stateAt.is(Blocks.BARREL)
+                        || stateAt.getBlock() instanceof BedBlock) {
+                    return null;
+                }
+
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+
+        // Verificación D: Desnivel del terreno <= 3 bloques
+        if (maxY - minY > 3) return null;
+
+        // ¡Sitio perfecto encontrado y reservado!
+        int chosenY = (minY + maxY) / 2;
+        NbtStructureLoader.VillagePlot chosenPlot = new NbtStructureLoader.VillagePlot(candMinX, candMinZ, candMaxX, candMaxZ, type);
+        this.occupiedVillagePlots.add(chosenPlot);
+        return new BlockPos(candMinX, chosenY, candMinZ);
+    }
+
+    public @Nullable BlockPos findNonOverlappingSiteGeneral(int width, int length, @Nullable StructureType type) {
+        BlockPos center = this.getCampCenterPos();
+
+        if (this.occupiedVillagePlots.isEmpty()) {
+            this.occupiedVillagePlots.add(new NbtStructureLoader.VillagePlot(center.getX() - 3, center.getZ() - 3, center.getX() + 3, center.getZ() + 3, NbtStructureLoader.StructureType.CAMPFIRE_BASE));
+        }
+
+        // Búsqueda en anillos concéntricos alrededor del centro comunal (distancias de 8 a 44 bloques)
+        for (int dist = 8; dist <= 44; dist += 3) {
+            for (int angleDeg = 0; angleDeg < 360; angleDeg += 20) {
                 double rad = Math.toRadians(angleDeg);
-                int ox = (int) Math.round(dist * Math.cos(rad));
-                int oz = (int) Math.round(dist * Math.sin(rad));
+                int ox = (int) Math.round(dist * Math.sin(rad));
+                int oz = -(int) Math.round(dist * Math.cos(rad));
 
                 int candMinX = center.getX() + ox;
                 int candMinZ = center.getZ() + oz;
-                int candMaxX = candMinX + width - 1;
-                int candMaxZ = candMinZ + length - 1;
 
-                // Verificación A: No colisionar con ninguna parcela ya construida o reservada (con margen de 2 bloques)
-                boolean collidesWithPlot = false;
-                for (StructureBlueprint.VillagePlot plot : this.occupiedVillagePlots) {
-                    if (plot.intersects(candMinX, candMinZ, candMaxX, candMaxZ, 2)) {
-                        collidesWithPlot = true;
-                        break;
-                    }
-                }
-                if (collidesWithPlot) continue;
-
-                // Verificación B: No superponerse con el campamento central
-                if (Math.abs((candMinX + width / 2) - center.getX()) <= 4 && Math.abs((candMinZ + length / 2) - center.getZ()) <= 4) {
-                    continue;
-                }
-
-                // Verificación C: Inspección en el mundo del terreno y estructuras existentes del jugador
-                int minY = Integer.MAX_VALUE;
-                int maxY = Integer.MIN_VALUE;
-                boolean invalidTerrain = false;
-
-                for (int x = candMinX; x <= candMaxX && !invalidTerrain; x++) {
-                    for (int z = candMinZ; z <= candMaxZ; z++) {
-                        int surfaceY = this.level().getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
-                        BlockPos testPos = new BlockPos(x, surfaceY, z);
-                        while (testPos.getY() > this.level().getMinY() && (this.level().getBlockState(testPos).isAir() || this.level().getBlockState(testPos).is(BlockTags.LEAVES))) {
-                            testPos = testPos.below();
-                        }
-                        int y = testPos.getY();
-                        BlockState stateAt = this.level().getBlockState(testPos);
-                        BlockState stateAbove = this.level().getBlockState(testPos.above());
-
-                        // No construir en agua o lava
-                        if (stateAt.getFluidState().is(FluidTags.WATER) || stateAt.getFluidState().is(FluidTags.LAVA)
-                                || stateAbove.getFluidState().is(FluidTags.WATER) || stateAbove.getFluidState().is(FluidTags.LAVA)) {
-                            invalidTerrain = true;
-                            break;
-                        }
-
-                        // Proteger estructuras y pertenencias de jugadores (cofres, camas, hornos, entidades con bloque)
-                        if (stateAt.hasBlockEntity() || stateAbove.hasBlockEntity()
-                                || stateAt.is(Blocks.CHEST) || stateAt.is(Blocks.BARREL)
-                                || stateAt.getBlock() instanceof BedBlock) {
-                            invalidTerrain = true;
-                            break;
-                        }
-
-                        if (y < minY) minY = y;
-                        if (y > maxY) maxY = y;
-                    }
-                }
-
-                if (invalidTerrain) continue;
-
-                // Verificación D: Desnivel del terreno <= 3 bloques
-                if (maxY - minY > 3) continue;
-
-                // ¡Sitio perfecto encontrado!
-                int chosenY = (minY + maxY) / 2;
-                StructureBlueprint.VillagePlot chosenPlot = new StructureBlueprint.VillagePlot(candMinX, candMinZ, candMaxX, candMaxZ);
-                this.occupiedVillagePlots.add(chosenPlot);
-                return new BlockPos(candMinX, chosenY, candMinZ);
+                BlockPos res = this.testAndSelectCandidatePlot(candMinX, candMinZ, width, length, type);
+                if (res != null) return res;
             }
         }
 
         return null;
     }
 
-    public boolean startNewVillageProject(StructureBlueprint.StructureType type) {
+    public @Nullable BlockPos findNonOverlappingSite(int width, int length) {
+        return this.findNonOverlappingSiteGeneral(width, length, null);
+    }
+
+    public boolean startCustomVillageProject(Identifier templateId, String displayName) {
+        if (this.activeVillageProject != null && !this.activeVillageProject.isCompleted()) {
+            return false;
+        }
+        net.minecraft.core.Vec3i dims = NbtStructureLoader.getDimensions(this.level(), templateId).orElse(new net.minecraft.core.Vec3i(5, 5, 5));
+        BlockPos origin = this.findNonOverlappingSite(dims.getX(), dims.getZ());
+        if (origin == null) {
+            Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+            Component msg = Component.literal("No encontramos terreno adecuado y libre para: ")
+                    .withStyle(ChatFormatting.RED)
+                    .append(Component.literal(displayName).withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD))
+                    .append(Component.literal(". ¡Se necesita un área plana libre de obstáculos y agua!").withStyle(ChatFormatting.RED));
+            Player owner = this.getOwner();
+            if (owner instanceof ServerPlayer sp) {
+                sp.sendSystemMessage(speaker.copy().append(msg));
+            }
+            return false;
+        }
+
+        this.villageProjectMissingItem = null;
+        this.activeVillageProject = new VillageProject(templateId, displayName, origin, this.level());
+
+        if (this.level() instanceof ServerLevel sl) {
+            sl.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.BELL_BLOCK, SoundSource.NEUTRAL, 1.0F, 0.9F);
+            sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, origin.getX() + dims.getX() / 2.0D, origin.getY() + 1.0D, origin.getZ() + dims.getZ() / 2.0D, 16, 1.5D, 0.5D, 1.5D, 0.05D);
+        }
+
+        Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+        Component msg = Component.literal("¡Iniciando la construcción personalizada de: ")
+                .withStyle(ChatFormatting.YELLOW)
+                .append(Component.literal(displayName).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD))
+                .append(Component.literal("! Nuestras constructoras aplanarán el terreno y buscarán los materiales necesarios.").withStyle(ChatFormatting.YELLOW));
+
+        Player owner = this.getOwner();
+        if (owner instanceof ServerPlayer sp) {
+            sp.sendSystemMessage(speaker.copy().append(msg));
+        }
+        return true;
+    }
+
+    public boolean startNewVillageProject(NbtStructureLoader.StructureType type) {
         if (this.activeVillageProject != null && !this.activeVillageProject.isCompleted()) {
             return false;
         }
@@ -1253,7 +1579,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         }
 
         this.villageProjectMissingItem = null;
-        this.activeVillageProject = new VillageProject(type, origin);
+        this.activeVillageProject = new VillageProject(type, origin, this.level());
 
         if (this.level() instanceof ServerLevel sl) {
             sl.playSound(null, this.getX(), this.getY(), this.getZ(), SoundEvents.BELL_BLOCK, SoundSource.NEUTRAL, 1.0F, 0.9F);
@@ -1261,10 +1587,17 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         }
 
         Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
+        String zoneDesc = switch (type) {
+            case CAMPFIRE_BASE -> " en el corazón central de nuestro campamento";
+            case TENT -> " en el sector residencial para cobijar a nuestras súbditas";
+            case FARM -> " en el sector agrícola comunal";
+            case STOREHOUSE -> " en el sector logístico junto a la plaza comunal";
+            case WATCHTOWER -> " en el perímetro exterior para fortificar y defender nuestra aldea";
+        };
         Component msg = Component.literal("¡Iniciando la construcción de: ")
                 .withStyle(ChatFormatting.YELLOW)
                 .append(Component.literal(type.getDisplayName()).withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD))
-                .append(Component.literal("! Nuestras constructoras aplanarán el terreno y buscarán los materiales necesarios.").withStyle(ChatFormatting.YELLOW));
+                .append(Component.literal(zoneDesc + "! Nuestras constructoras prepararán el terreno y reunirán los materiales.").withStyle(ChatFormatting.YELLOW));
 
         Player owner = this.getOwner();
         if (owner instanceof ServerPlayer sp) {
@@ -1278,6 +1611,15 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
 
         this.villageProjectMissingItem = null;
         this.builtStructuresCount++;
+        if (project.getStructureType() != null) {
+            switch (project.getStructureType()) {
+                case TENT -> this.builtTentsCount++;
+                case FARM -> this.builtFarmsCount++;
+                case STOREHOUSE -> this.builtStorehousesCount++;
+                case WATCHTOWER -> this.builtWatchtowersCount++;
+                case CAMPFIRE_BASE -> {}
+            }
+        }
         this.addProsperity(35);
 
         sl.playSound(null, this.getX(), this.getY(), this.getZ(),
@@ -1285,7 +1627,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         sl.sendParticles(ParticleTypes.HAPPY_VILLAGER, this.getX(), this.getY() + 1.5D, this.getZ(),
                 30, 1.0D, 1.0D, 1.0D, 0.1D);
 
-        String structName = project.getStructureType().getDisplayName();
+        String structName = project.getDisplayName();
         Component speaker = Component.literal("<" + this.getQueenTitle() + "> ").withStyle(ChatFormatting.GOLD);
         Component msg = Component.literal("¡Nuestra tribu ha completado la construcción de: ")
                 .withStyle(ChatFormatting.GREEN)
@@ -1332,28 +1674,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             this.evaluateAndReassignTribeRoles();
 
             if (this.activeVillageProject == null) {
-                VillageTier tier = this.getVillageTier();
-                StructureBlueprint.StructureType nextType = null;
-                if (this.builtStructuresCount == 0) {
-                    nextType = StructureBlueprint.StructureType.CAMPFIRE_BASE;
-                } else if (this.builtStructuresCount == 1) {
-                    nextType = StructureBlueprint.StructureType.TENT;
-                } else if (this.builtStructuresCount == 2) {
-                    nextType = StructureBlueprint.StructureType.TENT;
-                } else if (tier.getLevel() >= 2 && this.builtStructuresCount == 3) {
-                    nextType = StructureBlueprint.StructureType.FARM;
-                } else if (tier.getLevel() >= 2 && this.builtStructuresCount == 4) {
-                    nextType = StructureBlueprint.StructureType.STOREHOUSE;
-                } else if (tier.getLevel() >= 2 && this.builtStructuresCount == 5) {
-                    nextType = StructureBlueprint.StructureType.TENT;
-                } else if (tier.getLevel() >= 3 && this.builtStructuresCount == 6) {
-                    nextType = StructureBlueprint.StructureType.WATCHTOWER;
-                } else if (tier.getLevel() >= 3 && this.builtStructuresCount == 7) {
-                    nextType = StructureBlueprint.StructureType.WATCHTOWER;
-                } else if (tier.getLevel() >= 3 && this.builtStructuresCount >= 8 && this.builtStructuresCount < 12) {
-                    nextType = (this.builtStructuresCount % 2 == 0) ? StructureBlueprint.StructureType.WATCHTOWER : StructureBlueprint.StructureType.STOREHOUSE;
-                }
-
+                NbtStructureLoader.StructureType nextType = this.determineNextPlannedStructure();
                 if (nextType != null) {
                     this.startNewVillageProject(nextType);
                 }
@@ -1361,6 +1682,95 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
                 this.onStructureCompleted(this.activeVillageProject);
             }
         }
+    }
+
+    public int getTribeMemberCount() {
+        if (!(this.level() instanceof ServerLevel sl)) return 1;
+        String tribeName = this.getTribeName();
+        Player owner = this.getOwner();
+        List<AbstractTribalEntity> members = sl.getEntitiesOfClass(
+                AbstractTribalEntity.class,
+                this.getBoundingBox().inflate(64.0D),
+                k -> k.isAlive() && (
+                        (!tribeName.isEmpty() && Objects.equals(k.getTribeName(), tribeName))
+                        || (owner != null && k.isOwnedBy(owner))
+                        || k == this
+                        || k.getTribeQueen() == this
+                )
+        );
+        return Math.max(1, members.size());
+    }
+
+    public @Nullable StructureType determineNextPlannedStructure() {
+        // 1. Campamento Central (fogata base): punto central de la aldea
+        if (this.builtStructuresCount == 0 || !this.hasBuiltStructure(NbtStructureLoader.StructureType.CAMPFIRE_BASE)) {
+            return NbtStructureLoader.StructureType.CAMPFIRE_BASE;
+        }
+
+        VillageTier tier = this.getVillageTier();
+        int memberCount = this.getTribeMemberCount();
+        int tentsCount = this.getBuiltStructuresCount(NbtStructureLoader.StructureType.TENT);
+        int storehousesCount = this.getBuiltStructuresCount(NbtStructureLoader.StructureType.STOREHOUSE);
+        int farmsCount = this.getBuiltStructuresCount(NbtStructureLoader.StructureType.FARM);
+        int towersCount = this.getBuiltStructuresCount(NbtStructureLoader.StructureType.WATCHTOWER);
+
+        // 2. Tiendas iniciales: Asegurar al menos 1 tienda para los primeros miembros
+        if (tentsCount < Math.min(2, memberCount)) {
+            return NbtStructureLoader.StructureType.TENT;
+        }
+
+        // 3. Depósito de Suministros esencial: Para almacenar materiales y herramientas en la plaza
+        if (storehousesCount == 0) {
+            return NbtStructureLoader.StructureType.STOREHOUSE;
+        }
+
+        // 4. Granja Comunal: Para cultivar alimento para la tribu
+        if (farmsCount == 0) {
+            return NbtStructureLoader.StructureType.FARM;
+        }
+
+        // 5. ¡Una tienda por cada miembro de la tribu!
+        // Distribuye una tienda individual para cada súbdita en el sector residencial
+        if (tentsCount < memberCount) {
+            return NbtStructureLoader.StructureType.TENT;
+        }
+
+        // 6. Primera torre de guardia para iniciar la fortificación del perímetro
+        if (towersCount < 1) {
+            return NbtStructureLoader.StructureType.WATCHTOWER;
+        }
+
+        // 7. Expansión en Tier 2 (Asentamiento Próspero)
+        if (tier.getLevel() >= 2) {
+            // Fortificar las 4 esquinas del perímetro exterior
+            if (towersCount < 4) {
+                return NbtStructureLoader.StructureType.WATCHTOWER;
+            }
+            // Segunda granja si la población es de 4 o más
+            if (farmsCount < 2 && memberCount >= 4) {
+                return NbtStructureLoader.StructureType.FARM;
+            }
+            // Segundo almacén para depósitos adicionales
+            if (storehousesCount < 2 && this.builtStructuresCount >= 6) {
+                return NbtStructureLoader.StructureType.STOREHOUSE;
+            }
+        }
+
+        // 8. Expansión en Tier 3 (Bastión Tribal / Ciudadela)
+        if (tier.getLevel() >= 3) {
+            if (farmsCount < 3 && memberCount >= 6) {
+                return NbtStructureLoader.StructureType.FARM;
+            }
+            if (storehousesCount < 3) {
+                return NbtStructureLoader.StructureType.STOREHOUSE;
+            }
+            // Torres adicionales en las puertas de acceso cardinales (hasta 8 torres perimetrales)
+            if (towersCount < 8 && this.builtStructuresCount < 16) {
+                return NbtStructureLoader.StructureType.WATCHTOWER;
+            }
+        }
+
+        return null;
     }
 
     public boolean hasActiveVillageProject() {
@@ -1630,8 +2040,12 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         return this.getProfession() == KoboldProfession.MINER;
     }
 
+    public boolean isCarpenter() {
+        return this.getProfession() == KoboldProfession.CARPENTER;
+    }
+
     public boolean isLogger() {
-        return this.isBuilder() || this.isCivilian();
+        return this.isCarpenter() || this.isCivilian();
     }
 
     public boolean isWorkStance() {
@@ -2162,15 +2576,14 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
 
     @Override
     public boolean removeWhenFarAway(double distanceToClosestPlayer) {
-        if (this.isOwned() || this.isAnyQueen() || this.hasCustomName()) {
-            return false;
-        }
-        return super.removeWhenFarAway(distanceToClosestPlayer);
+        // Las tribus son aldeas permanentes (similar a los aldeanos de Minecraft):
+        // Ningún miembro de ninguna tribu (salvaje o domesticada, reina o súbdita) debe despawnear.
+        return false;
     }
 
     @Override
     public boolean requiresCustomPersistence() {
-        return super.requiresCustomPersistence() || this.isOwned() || this.isAnyQueen();
+        return true;
     }
 
     private @Nullable UUID playerDuelTargetUUID = null;
@@ -2532,6 +2945,22 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
 
     public void setTribeName(String tribeName) {
         this.entityData.set(DATA_TRIBE_NAME, tribeName != null ? tribeName : "");
+    }
+
+    public int getTribeVariant() {
+        return this.entityData.get(DATA_TRIBE_VARIANT);
+    }
+
+    public void setTribeVariant(int variant) {
+        this.entityData.set(DATA_TRIBE_VARIANT, variant);
+    }
+
+    public KoboldTribeVariant getVariantType() {
+        return KoboldTribeVariant.byId(this.getTribeVariant());
+    }
+
+    public void setVariantType(KoboldTribeVariant variant) {
+        this.setTribeVariant(variant != null ? variant.getId() : 0);
     }
 
     public boolean hasTribe() {
@@ -5037,10 +5466,9 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             return null;
         }
 
-        // Si la Kobold no tiene dueño, solo puede interactuar con cofres que tengan marco de ítem explícito
-        // (los cofres sin marco son personales del jugador y las salvajes no los tocan)
+        // Si la Kobold no tiene dueño, puede interactuar con cofres con marco o cofres comunales dentro de las parcelas de la aldea
         if (!isOwnedMob) {
-            chests.removeIf(p -> getCategoryFromItemFrame(this.level(), p) == null);
+            chests.removeIf(p -> getCategoryFromItemFrame(this.level(), p) == null && !this.isPosInsideAnyOccupiedPlot(p.getX(), p.getZ()));
             if (chests.isEmpty()) return null;
         }
 
@@ -5924,6 +6352,16 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         return stack.is(ItemTags.AXES);
     }
 
+    public static boolean isPickaxe(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        return stack.is(ItemTags.PICKAXES);
+    }
+
+    public static boolean isShovel(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        return stack.is(ItemTags.SHOVELS);
+    }
+
     public static boolean isMeleeWeapon(ItemStack stack) {
         if (stack.isEmpty()) return true;
         return !isRangedWeapon(stack) && (isWeapon(stack) || stack.is(ItemTags.HOES));
@@ -6338,8 +6776,8 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
     public boolean wantsToPickUpItem(ItemStack stack) {
         if (stack.isEmpty()) return false;
 
-        // 1. Descartar basura absoluta (bloques de terreno, césped, flores, comida venenosa, etc.)
-        if (isJunkItem(stack)) {
+        // 1. Descartar basura o ítems nocivos/venenosos que nadie debe consumir
+        if (stack.is(Items.POISONOUS_POTATO) || stack.is(Items.PUFFERFISH)) {
             return false;
         }
 
@@ -6358,7 +6796,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             return true;
         }
 
-        // 4. Reina (o Reina Sobreviviente): Comportamiento de líder y hechicera de tribu
+        // 5. Reina (o Reina Sobreviviente): Comportamiento de líder y hechicera de tribu
         if (this.isAnyQueen()) {
             // Minerales valiosos (diamantes, esmeraldas, oro, hierro)
             if (isMineralOrResource(stack)) {
@@ -6378,9 +6816,68 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
 
         KoboldProfession prof = this.getProfession();
 
-        // 5. Filtrado estricto por profesión para súbditas
+        // 6. Filtrado estricto por profesión para súbditas
         switch (prof) {
+            case CARPENTER -> {
+                if (isAxe(stack)) {
+                    if (this.getMainHandItem().isEmpty()) return true;
+                    return this.evaluateWeaponRating(stack) > this.evaluateWeaponRating(this.getMainHandItem());
+                }
+                if (stack.is(ItemTags.LOGS) || stack.is(ItemTags.PLANKS) || stack.is(ItemTags.SAPLINGS) || stack.is(Items.STICK)) {
+                    return true;
+                }
+                return false;
+            }
+
+            case MINER -> {
+                if (isPickaxe(stack) || isShovel(stack)) {
+                    return true;
+                }
+                if (isMineralOrResource(stack) || stack.is(ItemTags.COALS) || stack.is(Items.RAW_IRON) || stack.is(Items.RAW_COPPER) || stack.is(Items.RAW_GOLD) || stack.is(Items.COAL) || stack.is(Items.FLINT)) {
+                    return true;
+                }
+                if (stack.is(ItemTags.STONE_CRAFTING_MATERIALS) || stack.is(ItemTags.STONE_TOOL_MATERIALS) || stack.is(Items.COBBLESTONE) || stack.is(Items.COBBLED_DEEPSLATE) || stack.is(Items.STONE) || stack.is(Items.DEEPSLATE) || stack.is(Items.TUFF) || stack.is(Items.ANDESITE) || stack.is(Items.DIORITE) || stack.is(Items.GRANITE)) {
+                    return true;
+                }
+                if (stack.is(ItemTags.DIRT) || stack.is(Items.DIRT) || stack.is(Items.SAND) || stack.is(Items.GRAVEL) || stack.is(Items.CLAY_BALL)) {
+                    return true;
+                }
+                return false;
+            }
+
+            case BUILDER -> {
+                if (isPickaxe(stack) || isAxe(stack) || isShovel(stack)) {
+                    return true;
+                }
+                if (stack.is(ItemTags.PLANKS) || stack.is(ItemTags.LOGS) || stack.is(Items.COBBLESTONE) || stack.is(ItemTags.STONE_CRAFTING_MATERIALS) || stack.is(ItemTags.DIRT) || stack.is(Items.DIRT) || stack.is(Items.TORCH)) {
+                    return true;
+                }
+                return false;
+            }
+
+            case SCOUT -> {
+                if (isWeapon(stack) || isRangedWeapon(stack)) {
+                    if (this.getMainHandItem().isEmpty()) return true;
+                    return this.evaluateWeaponRating(stack) > this.evaluateWeaponRating(this.getMainHandItem());
+                }
+                if (stack.is(Items.COMPASS) || stack.is(Items.SPYGLASS) || stack.is(Items.FEATHER) || stack.is(Items.LEATHER)) {
+                    return true;
+                }
+                return false;
+            }
+
+            case ALCHEMIST -> {
+                if (stack.is(Items.GLASS_BOTTLE) || stack.is(Items.POTION) || stack.is(Items.SPLASH_POTION) || stack.is(Items.BREWING_STAND) || stack.is(Items.NETHER_WART) || stack.is(Items.BLAZE_POWDER) || stack.is(Items.REDSTONE) || stack.is(Items.GLOWSTONE_DUST) || stack.is(Items.FERMENTED_SPIDER_EYE) || stack.is(Items.GOLDEN_CARROT) || stack.is(Items.GLISTERING_MELON_SLICE) || stack.is(Items.MAGMA_CREAM) || stack.is(Items.RABBIT_FOOT) || stack.is(Items.SUGAR) || stack.is(Items.BROWN_MUSHROOM) || stack.is(Items.RED_MUSHROOM)) {
+                    return true;
+                }
+                if (stack.getItem() instanceof BlockItem bi && bi.getBlock().defaultBlockState().is(BlockTags.FLOWERS)) {
+                    return true;
+                }
+                return false;
+            }
+
             case FARMER -> {
+                if (isJunkItem(stack)) return false;
                 // Herramientas agrícolas: Azada (si no tiene o es mejor)
                 if (isHoe(stack)) {
                     return !this.hasHoeInInventory() || this.evaluateHoeRating(stack) > this.evaluateHoeRating(this.getMainHandItem());
@@ -6402,6 +6899,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             }
 
             case HUNTER -> {
+                if (isJunkItem(stack)) return false;
                 // Carnes crudas (para cocinar en fogatas) y carnes cocinadas
                 if (isRawMeat(stack) || isCookedMeat(stack)) {
                     return this.countRawMeatInInventory() < 32;
@@ -6424,6 +6922,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             }
 
             case GUARD -> {
+                if (isJunkItem(stack)) return false;
                 // Armas cuerpo a cuerpo exclusivamente (Espadas, Mazas, Lanzas/Tridentes)
                 if (isWeapon(stack) && !isRangedWeapon(stack) && !isHoe(stack)) {
                     if (this.getMainHandItem().isEmpty()) return true;
@@ -6438,6 +6937,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             }
 
             case VIGILANT -> {
+                if (isJunkItem(stack)) return false;
                 // Armas a distancia exclusivamente (Arcos, Ballestas)
                 if (isRangedWeapon(stack)) {
                     if (this.getMainHandItem().isEmpty()) return true;
@@ -6452,6 +6952,9 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             }
 
             default -> { // Súbdita común (NONE)
+                if (isJunkItem(stack)) {
+                    return false;
+                }
                 // Arma básica si está desarmada
                 if (isWeapon(stack) && !isHoe(stack) && this.getMainHandItem().isEmpty()) {
                     return true;
@@ -7038,20 +7541,14 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
                     String stateStr = !this.activeVillageProject.isTerraformed()
                             ? "§eAplanando y nivelando terreno para cimientos..."
                             : "§aEdificando estructura (" + (this.activeVillageProject.getBuildIndex() * 100 / Math.max(1, this.activeVillageProject.getTotalBlocks())) + "%)";
-                    player.sendSystemMessage(Component.literal("§d🏗 Proyecto activo: §f" + this.activeVillageProject.getStructureType().getDisplayName() + " §7- " + stateStr));
+                    player.sendSystemMessage(Component.literal("§d🏗 Proyecto activo: §f" + this.activeVillageProject.getDisplayName() + " §7- " + stateStr));
                     if (this.villageProjectMissingItem != null) {
                         player.sendSystemMessage(Component.literal("§c⚠ Obras pausadas: §eFalta 1x " + new ItemStack(this.villageProjectMissingItem).getHoverName().getString() + " §7en los cofres comunales."));
                         player.sendSystemMessage(Component.literal("§7💡 Coloca el ítem en cualquier cofre o barril de la aldea y las constructoras irán a buscarlo."));
                     }
                 } else {
                     player.sendSystemMessage(Component.literal("§aNo hay obras activas en este instante. Nuestras súbditas constructoras están listas."));
-                    StructureBlueprint.StructureType nextType = null;
-                    if (this.builtStructuresCount == 0) nextType = StructureBlueprint.StructureType.CAMPFIRE_BASE;
-                    else if (this.builtStructuresCount <= 2) nextType = StructureBlueprint.StructureType.TENT;
-                    else if (tier.getLevel() >= 2 && this.builtStructuresCount == 3) nextType = StructureBlueprint.StructureType.FARM;
-                    else if (tier.getLevel() >= 2 && this.builtStructuresCount == 4) nextType = StructureBlueprint.StructureType.STOREHOUSE;
-                    else if (tier.getLevel() >= 2 && this.builtStructuresCount == 5) nextType = StructureBlueprint.StructureType.TENT;
-                    else if (tier.getLevel() >= 3 && this.builtStructuresCount <= 7) nextType = StructureBlueprint.StructureType.WATCHTOWER;
+                    NbtStructureLoader.StructureType nextType = this.determineNextPlannedStructure();
 
                     if (nextType != null) {
                         this.startNewVillageProject(nextType);
@@ -7212,7 +7709,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         player.sendSystemMessage(Component.literal("§7Rango de la aldea: §b" + this.getVillageTier().getIcon() + " " + this.getVillageTier().getDisplayName() + " §7(Prosperidad: §e" + this.getProsperity() + "§7/300)"));
         if (this.activeVillageProject != null) {
             String stateStr = !this.activeVillageProject.isTerraformed() ? "§eAplanando y nivelando terreno..." : "§aConstruyendo (" + (this.activeVillageProject.getBuildIndex() * 100 / Math.max(1, this.activeVillageProject.getTotalBlocks())) + "%)";
-            player.sendSystemMessage(Component.literal("§d🏗 Proyecto en curso: §f" + this.activeVillageProject.getStructureType().getDisplayName() + " - " + stateStr));
+            player.sendSystemMessage(Component.literal("§d🏗 Proyecto en curso: §f" + this.activeVillageProject.getDisplayName() + " - " + stateStr));
             if (this.villageProjectMissingItem != null) {
                 player.sendSystemMessage(Component.literal("§c  ⚠ Pausado: §eFalta 1x " + new ItemStack(this.villageProjectMissingItem).getHoverName().getString() + " §7en los cofres de la aldea."));
             }
@@ -7552,6 +8049,59 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         }
     }
 
+    public void damageAxe(int amount) {
+        if (this.level() instanceof ServerLevel sl) {
+            for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+                ItemStack stack = this.inventory.getItem(i);
+                if (stack.is(ItemTags.AXES)) {
+                    stack.hurtAndBreak(amount, sl, null, item -> {});
+                    return;
+                }
+            }
+        }
+    }
+
+    public void damageShovel(int amount) {
+        if (this.level() instanceof ServerLevel sl) {
+            for (int i = 0; i < this.inventory.getContainerSize(); i++) {
+                ItemStack stack = this.inventory.getItem(i);
+                if (stack.is(ItemTags.SHOVELS)) {
+                    stack.hurtAndBreak(amount, sl, null, item -> {});
+                    return;
+                }
+            }
+        }
+    }
+
+    private @Nullable BlockPos miningZonePos = null;
+
+    public @Nullable BlockPos getMiningZonePos() {
+        if (this.miningZonePos != null) return this.miningZonePos;
+        AbstractTribalEntity queen = this.isAnyQueen() ? this : this.getTribeQueen();
+        if (queen != null && queen != this && queen.miningZonePos != null) {
+            return queen.miningZonePos;
+        }
+        return null;
+    }
+
+    public void setMiningZonePos(@Nullable BlockPos pos) {
+        this.miningZonePos = pos;
+        AbstractTribalEntity queen = this.isAnyQueen() ? this : this.getTribeQueen();
+        if (queen != null && queen != this) {
+            queen.miningZonePos = pos;
+        }
+    }
+
+    public boolean isPosInsideAnyOccupiedPlot(int x, int z) {
+        AbstractTribalEntity queen = this.isAnyQueen() ? this : this.getTribeQueen();
+        if (queen != null) {
+            for (NbtStructureLoader.VillagePlot plot : queen.getOccupiedVillagePlots()) {
+                if (plot.contains(x, z)) return true;
+            }
+        }
+        return false;
+    }
+
     /* =========================================================================
        PROTECCIÓN CONTRA FUEGO AMIGO: No se dañan entre sí
        ========================================================================= */
@@ -7800,6 +8350,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         super.addAdditionalSaveData(output);
         output.putBoolean("IsQueen", this.isQueen());
         output.putString("TribeName", this.getTribeName());
+        output.putInt("TribeVariant", this.getTribeVariant());
         output.putBoolean("IsRebel", this.isRebel());
         output.putBoolean("IsInPowerStruggle", this.isInPowerStruggle());
         output.putBoolean("IsSurvivorQueen", this.isSurvivorQueen());
@@ -7853,13 +8404,23 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         }
         output.putInt("Prosperity", this.getProsperity());
         output.putInt("BuiltStructuresCount", this.builtStructuresCount);
+        output.putInt("BuiltTentsCount", this.builtTentsCount);
+        output.putInt("BuiltFarmsCount", this.builtFarmsCount);
+        output.putInt("BuiltStorehousesCount", this.builtStorehousesCount);
+        output.putInt("BuiltWatchtowersCount", this.builtWatchtowersCount);
+        if (this.villageOrientationAngle != null) {
+            output.putInt("VillageOrientationAngle", this.villageOrientationAngle);
+        }
         output.putInt("OccupiedPlotsCount", this.occupiedVillagePlots.size());
         for (int i = 0; i < this.occupiedVillagePlots.size(); i++) {
-            StructureBlueprint.VillagePlot plot = this.occupiedVillagePlots.get(i);
+            NbtStructureLoader.VillagePlot plot = this.occupiedVillagePlots.get(i);
             output.putInt("Plot_" + i + "_minX", plot.minX());
             output.putInt("Plot_" + i + "_minZ", plot.minZ());
             output.putInt("Plot_" + i + "_maxX", plot.maxX());
             output.putInt("Plot_" + i + "_maxZ", plot.maxZ());
+            if (plot.structureType() != null) {
+                output.putString("Plot_" + i + "_type", plot.structureType().name());
+            }
         }
         if (this.campCenterPos != null) {
             output.putBoolean("HasCampCenter", true);
@@ -7868,6 +8429,14 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             output.putInt("CampCenterZ", this.campCenterPos.getZ());
         } else {
             output.putBoolean("HasCampCenter", false);
+        }
+        if (this.miningZonePos != null) {
+            output.putBoolean("HasMiningZone", true);
+            output.putInt("MiningZoneX", this.miningZonePos.getX());
+            output.putInt("MiningZoneY", this.miningZonePos.getY());
+            output.putInt("MiningZoneZ", this.miningZonePos.getZ());
+        } else {
+            output.putBoolean("HasMiningZone", false);
         }
         if (this.activeVillageProject != null) {
             output.putBoolean("HasActiveProject", true);
@@ -7910,6 +8479,7 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         super.readAdditionalSaveData(input);
         this.setQueen(input.getBooleanOr("IsQueen", false));
         this.setTribeName(input.getStringOr("TribeName", ""));
+        this.setTribeVariant(input.getIntOr("TribeVariant", 0));
         this.setRebel(input.getBooleanOr("IsRebel", false));
         this.setInPowerStruggle(input.getBooleanOr("IsInPowerStruggle", false));
         this.setSurvivorQueen(input.getBooleanOr("IsSurvivorQueen", false));
@@ -7977,6 +8547,14 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         }
         this.setProsperity(input.getIntOr("Prosperity", 0));
         this.builtStructuresCount = input.getIntOr("BuiltStructuresCount", 0);
+        this.builtTentsCount = input.getIntOr("BuiltTentsCount", 0);
+        this.builtFarmsCount = input.getIntOr("BuiltFarmsCount", 0);
+        this.builtStorehousesCount = input.getIntOr("BuiltStorehousesCount", 0);
+        this.builtWatchtowersCount = input.getIntOr("BuiltWatchtowersCount", 0);
+        int savedAngle = input.getIntOr("VillageOrientationAngle", -1);
+        if (savedAngle >= 0) {
+            this.villageOrientationAngle = savedAngle;
+        }
         int plotCount = input.getIntOr("OccupiedPlotsCount", 0);
         this.occupiedVillagePlots.clear();
         for (int i = 0; i < plotCount; i++) {
@@ -7984,7 +8562,47 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
             int minZ = input.getIntOr("Plot_" + i + "_minZ", 0);
             int maxX = input.getIntOr("Plot_" + i + "_maxX", 0);
             int maxZ = input.getIntOr("Plot_" + i + "_maxZ", 0);
-            this.occupiedVillagePlots.add(new StructureBlueprint.VillagePlot(minX, minZ, maxX, maxZ));
+            String typeName = input.getStringOr("Plot_" + i + "_type", "");
+            NbtStructureLoader.StructureType plotType = null;
+            if (!typeName.isEmpty()) {
+                try {
+                    plotType = NbtStructureLoader.StructureType.valueOf(typeName);
+                } catch (IllegalArgumentException ignored) {}
+            }
+            this.occupiedVillagePlots.add(new NbtStructureLoader.VillagePlot(minX, minZ, maxX, maxZ, plotType));
+        }
+
+        // Deducción para mundos creados en versiones anteriores
+        if (this.builtStructuresCount > 0 && this.builtTentsCount == 0 && this.builtFarmsCount == 0 && this.builtStorehousesCount == 0 && this.builtWatchtowersCount == 0) {
+            int deducedTents = 0;
+            int deducedFarms = 0;
+            int deducedStorehouses = 0;
+            int deducedTowers = 0;
+            for (NbtStructureLoader.VillagePlot plot : this.occupiedVillagePlots) {
+                if (plot.structureType() != null) {
+                    switch (plot.structureType()) {
+                        case TENT -> deducedTents++;
+                        case FARM -> deducedFarms++;
+                        case STOREHOUSE -> deducedStorehouses++;
+                        case WATCHTOWER -> deducedTowers++;
+                        default -> {}
+                    }
+                }
+            }
+            if (deducedTents + deducedFarms + deducedStorehouses + deducedTowers > 0) {
+                this.builtTentsCount = deducedTents;
+                this.builtFarmsCount = deducedFarms;
+                this.builtStorehousesCount = deducedStorehouses;
+                this.builtWatchtowersCount = deducedTowers;
+            } else {
+                if (this.builtStructuresCount >= 2) this.builtTentsCount = Math.min(2, this.builtStructuresCount - 1);
+                if (this.builtStructuresCount >= 4) this.builtFarmsCount = 1;
+                if (this.builtStructuresCount >= 5) this.builtStorehousesCount = 1;
+                if (this.builtStructuresCount >= 6) this.builtTentsCount = 3;
+                if (this.builtStructuresCount >= 7) this.builtWatchtowersCount = 1;
+                if (this.builtStructuresCount >= 8) this.builtFarmsCount = 2;
+                if (this.builtStructuresCount >= 9) this.builtWatchtowersCount = 2;
+            }
         }
         if (input.getBooleanOr("HasCampCenter", false)) {
             int cx = input.getIntOr("CampCenterX", 0);
@@ -7994,13 +8612,21 @@ public abstract class AbstractTribalEntity extends PathfinderMob implements Merc
         } else {
             this.campCenterPos = null;
         }
+        if (input.getBooleanOr("HasMiningZone", false)) {
+            int mx = input.getIntOr("MiningZoneX", 0);
+            int my = input.getIntOr("MiningZoneY", 0);
+            int mz = input.getIntOr("MiningZoneZ", 0);
+            this.miningZonePos = new BlockPos(mx, my, mz);
+        } else {
+            this.miningZonePos = null;
+        }
         if (input.getBooleanOr("HasActiveProject", false)) {
             String typeName = input.getStringOr("ProjectType", "");
             if (!typeName.isEmpty()) {
                 try {
-                    StructureBlueprint.StructureType type = StructureBlueprint.StructureType.valueOf(typeName);
+                    NbtStructureLoader.StructureType type = NbtStructureLoader.StructureType.valueOf(typeName);
                     BlockPos origin = new BlockPos(input.getIntOr("ProjectOriginX", 0), input.getIntOr("ProjectOriginY", 0), input.getIntOr("ProjectOriginZ", 0));
-                    this.activeVillageProject = new VillageProject(type, origin);
+                    this.activeVillageProject = new VillageProject(type, origin, this.level());
                     this.activeVillageProject.setTerraformed(input.getBooleanOr("ProjectTerraformed", false));
                     int bIndex = input.getIntOr("ProjectBuildIndex", 0);
                     for (int i = 0; i < bIndex && !this.activeVillageProject.isCompleted(); i++) {

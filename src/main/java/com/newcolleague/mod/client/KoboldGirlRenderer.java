@@ -13,7 +13,9 @@ import org.jspecify.annotations.Nullable;
 public class KoboldGirlRenderer extends GeoEntityRenderer<KoboldGirlEntity, LivingEntityRenderState> {
 
     public static final DataTicket<Boolean> IS_QUEEN = DataTicket.create("is_queen", Boolean.class);
+    public static final DataTicket<Boolean> IS_SURVIVOR_QUEEN = DataTicket.create("is_survivor_queen", Boolean.class);
     public static final DataTicket<Boolean> IS_REINCARNATING = DataTicket.create("is_reincarnating", Boolean.class);
+    public static final DataTicket<Integer> TRIBE_VARIANT = DataTicket.create("tribe_variant", Integer.class);
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     public KoboldGirlRenderer(EntityRendererProvider.Context renderManager) {
@@ -27,7 +29,9 @@ public class KoboldGirlRenderer extends GeoEntityRenderer<KoboldGirlEntity, Livi
         super.addRenderData(animatable, relatedObject, renderState, partialTick);
         if ((Object) renderState instanceof com.geckolib.renderer.base.GeoRenderState geoState) {
             geoState.addGeckolibData(IS_QUEEN, animatable.isAnyQueen());
+            geoState.addGeckolibData(IS_SURVIVOR_QUEEN, animatable.isSurvivorQueen());
             geoState.addGeckolibData(IS_REINCARNATING, animatable.isReincarnating());
+            geoState.addGeckolibData(TRIBE_VARIANT, animatable.getTribeVariant());
         }
     }
 

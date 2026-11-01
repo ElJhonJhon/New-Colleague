@@ -1,6 +1,7 @@
 package com.newcolleague.mod.entity;
 
 import com.newcolleague.mod.NewColleagueMod;
+import com.newcolleague.mod.entity.boss.SpikeBeastEntity;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
@@ -21,4 +22,13 @@ public class ModEntities {
                     .sized(0.75F, 1.8F)
                     .clientTrackingRange(10)
                     .build(KOBOLD_GIRL_KEY));
+
+    public static final ResourceKey<EntityType<?>> SPIKE_BEAST_KEY =
+            ResourceKey.create(Registries.ENTITY_TYPE, Identifier.fromNamespaceAndPath(NewColleagueMod.MODID, "spike_beast"));
+
+    public static final DeferredHolder<EntityType<?>, EntityType<SpikeBeastEntity>> SPIKE_BEAST =
+            ENTITIES.register("spike_beast", () -> EntityType.Builder.of(SpikeBeastEntity::new, MobCategory.MONSTER)
+                    .sized(2.2F, 3.4F)
+                    .clientTrackingRange(12)
+                    .build(SPIKE_BEAST_KEY));
 }
